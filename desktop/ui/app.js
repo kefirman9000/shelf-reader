@@ -907,12 +907,13 @@ function showMenu(x, y, items) {
   const m = $('#menu');
   m.innerHTML = items.map((it, i) => (it ? `<div data-i="${i}">${esc(it[0])}</div>` : '<hr>')).join('');
   m.hidden = false;
+  m.openedAt = performance.now();   // the click that opened the menu must not close it again
   const r = m.getBoundingClientRect();
   m.style.left = Math.min(x, innerWidth - r.width - 8) + 'px';
   m.style.top = Math.min(y, innerHeight - r.height - 8) + 'px';
   m.onclick = (e) => { const d = e.target.closest('[data-i]'); if (!d) return; m.hidden = true; items[+d.dataset.i][1](); };
 }
-document.addEventListener('click', (e) => { if (!e.target.closest('#menu')) $('#menu').hidden = true; });
+document.addEventListener('click', (e) => { const m = $('#menu'); if (performance.now() - (m.openedAt || 0) < 80) return; if (!e.target.closest('#menu')) m.hidden = true; });
 function modal(html, actions) {
   $('#modalBody').innerHTML = html;
   $('#modalActions').innerHTML = '';
