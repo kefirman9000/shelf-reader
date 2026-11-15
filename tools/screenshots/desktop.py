@@ -82,9 +82,9 @@ with sync_playwright() as pw:
     def reader():
         page.click("#contOpen")
         page.wait_for_timeout(4000)
-        shot(page, "pc-06-reader")
+        shot(page, "pc-06-reader-book-pages")  # book pages is the default layout
         page.click("#layoutBtn"); page.wait_for_timeout(2500)
-        shot(page, "pc-07-reader-book-pages")
+        shot(page, "pc-07-reader-scroll")
         page.click("#layoutBtn"); page.wait_for_timeout(1500)
         page.click("#chapBtn"); page.wait_for_timeout(1500)
         shot(page, "pc-08-chapters")

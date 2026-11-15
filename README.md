@@ -3,36 +3,68 @@
 An Android ebook reader that finds free, legal books and **reads them aloud** with your phone's natural voices, including Google's. It keeps reading with the screen off, like an audiobook.
 
 
+## On your phone
+
+<table>
+  <tr>
+    <td width="25%"><img src="docs/screenshots/android/02-library-grid.jpg" alt="Library in grid view with a Continue listening card"></td>
+    <td width="25%"><img src="docs/screenshots/android/14-reader-pages.jpg" alt="Reading a book page by page, with the player below"></td>
+    <td width="25%"><img src="docs/screenshots/android/09-find-books-results.jpg" alt="Search results for free books by Jane Austen"></td>
+    <td width="25%"><img src="docs/screenshots/android/04-book-menu.jpg" alt="Press and hold a book for its menu"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Your library, with the book you're listening to on top</sub></td>
+    <td align="center"><sub>Read and listen; the player shows time left in the chapter</sub></td>
+    <td align="center"><sub>Find free, legal books from six libraries</sub></td>
+    <td align="center"><sub>Press and hold a book for everything you can do with it</sub></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/android/06-library-shelf.jpg" alt="Library on wooden shelves"></td>
+    <td><img src="docs/screenshots/android/16-paragraph-menu.jpg" alt="Press and hold a paragraph to bookmark, note, highlight or copy"></td>
+    <td><img src="docs/screenshots/android/17-more-menu.jpg" alt="The reader's More menu"></td>
+    <td><img src="docs/screenshots/android/11-settings.jpg" alt="Settings"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Or see your books on a shelf</sub></td>
+    <td align="center"><sub>Bookmarks, notes, highlights and audio clips</sub></td>
+    <td align="center"><sub>Go to, voice, sleep timer, save as audio…</sub></td>
+    <td align="center"><sub>Every option in one place</sub></td>
+  </tr>
+</table>
+
+## On your PC
+
 <p align="center">
-  <img src="docs/screenshots/desktop-shelf.png" alt="Library shelf view" width="900">
+  <img src="docs/screenshots/pc/02-library-grid.jpg" alt="PC app: library in grid view" width="900">
 </p>
 
 <table>
   <tr>
-    <td><img src="docs/screenshots/desktop-book.png" alt="Book view: a two-page spread, reading aloud with the current sentence highlighted"></td>
-    <td><img src="docs/screenshots/desktop-chapters.png" alt="Chapter list"></td>
+    <td><img src="docs/screenshots/pc/06-reader-book-pages.jpg" alt="Book view: a two-page spread"></td>
+    <td><img src="docs/screenshots/pc/08-chapters.jpg" alt="Chapter list"></td>
   </tr>
   <tr>
     <td align="center"><sub>Book view: turn pages like a real book while it reads aloud</sub></td>
     <td align="center"><sub>Chapters from the book's table of contents</sub></td>
   </tr>
   <tr>
-    <td><img src="docs/screenshots/desktop-grid.png" alt="Grid view"></td>
-    <td><img src="docs/screenshots/desktop-settings.png" alt="Settings"></td>
+    <td><img src="docs/screenshots/pc/05-find-books-results.jpg" alt="Find books"></td>
+    <td><img src="docs/screenshots/pc/09-settings.jpg" alt="Settings"></td>
   </tr>
   <tr>
-    <td align="center"><sub>Grid view with progress bars</sub></td>
-    <td align="center"><sub>Themes, fonts, pronunciation fixes, backup</sub></td>
+    <td align="center"><sub>Find books, with covers and how popular each one is</sub></td>
+    <td align="center"><sub>Themes, fonts, voices, pronunciation fixes</sub></td>
   </tr>
 </table>
 
-<sub>Screenshots from the Windows app in dark mode. The sample book text was written for these screenshots.</sub>
+<sub>Sample books are public-domain titles from Project Gutenberg. More screenshots: [phone](docs/screenshots/android), [PC](docs/screenshots/pc).
+To make new ones, run **Actions → Screenshots → Run workflow**.</sub>
 
 ---
 
 ## Audiobook maker
 
-![Audiobook maker](docs/screenshots/maker.png)
+![Audiobook maker](docs/screenshots/pc/10-audiobook-maker.jpg)
 
 A drag-and-drop page that turns a book into audiobook files. Open it from the **Audiobook maker** button in the PC app, or host it with GitHub Pages (see below).
 
