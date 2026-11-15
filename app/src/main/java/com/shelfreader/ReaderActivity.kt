@@ -492,10 +492,11 @@ class ReaderActivity : Activity() {
     // ---------- voices ----------
 
     private fun pickVoice() {
-        val engine = TtsService.instance?.engine() ?: (if (probeReady) probe else null)
-        if (engine != null) { showVoices(engine); return }
+        // A separate engine is used for listing and previewing, so previews don't disturb playback.
+        val p = probe
+        if (p != null && probeReady) { showVoices(p); return }
         status.text = "Loading voices…"
-        if (probe == null) {
+        if (p == null) {
             probe = TextToSpeech(this) { st ->
                 runOnUiThread {
                     if (st == TextToSpeech.SUCCESS) {
@@ -510,38 +511,50 @@ class ReaderActivity : Activity() {
         }
     }
 
+    private class VoiceChoice(val voice: Voice?, val label: String)
+
     private fun showVoices(engine: TextToSpeech) {
         val all: List<Voice> = try { engine.voices?.toList() ?: emptyList() } catch (e: Throwable) { emptyList() }
         val lang = Locale.getDefault().language
-        val voices = all.filter {
+        val usable = all.filter {
             it.locale.language == lang &&
                 !(it.features?.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) ?: false)
-        }.sortedWith(compareBy<Voice>({ it.isNetworkConnectionRequired }, { it.locale.toString() }, { it.name }))
+        }
+        val choices = ArrayList<VoiceChoice>()
+        choices += VoiceChoice(null, "Phone's default voice")
+        choices += VoiceNames.friendly(usable).map { VoiceChoice(it.first, it.second) }
         val chosen = Settings.voiceFor(this, book.id)
-        val labels = ArrayList<String>()
-        labels += (if (chosen == null) "✓ " else "") + "System default voice"
-        for (v in voices) labels += (if (v.name == chosen) "✓ " else "") + voiceLabel(v)
-        labels += "Get more voices…"
+        var picked = choices.indexOfFirst { it.voice?.name == chosen }.let { if (it < 0) 0 else it }
+        val wasPlaying = isPlaying()
+        if (wasPlaying) startService(Intent(this, TtsService::class.java).setAction(TtsService.ACTION_PAUSE))
+
         AlertDialog.Builder(this)
-            .setTitle("Voice for this book")
-            .setItems(labels.toTypedArray()) { _, w ->
-                when (w) {
-                    0 -> Settings.setBookVoice(this, book.id, null)
-                    labels.size - 1 -> { openTtsSettings(); return@setItems }
-                    else -> Settings.setBookVoice(this, book.id, voices[w - 1].name)
-                }
-                TtsService.instance?.applySettings(true)
-                if (service() == null && loaded) toast("Voice saved — press Play to hear it.")
+            .setTitle("Voice for this book. Tap to hear it.")
+            .setSingleChoiceItems(choices.map { it.label }.toTypedArray(), picked) { _, w ->
+                picked = w
+                preview(engine, choices[w].voice)
             }
+            .setPositiveButton("Use this voice") { _, _ ->
+                engine.stop()
+                Settings.setBookVoice(this, book.id, choices[picked].voice?.name)
+                TtsService.instance?.applySettings(false)
+                if (wasPlaying) startService(Intent(this, TtsService::class.java).setAction(TtsService.ACTION_TOGGLE))
+                else toast("Voice saved. Press Play to listen.")
+            }
+            .setNeutralButton("Get more voices…") { _, _ -> engine.stop(); openTtsSettings() }
+            .setNegativeButton("Cancel") { _, _ -> engine.stop() }
             .show()
     }
 
-    private fun voiceLabel(v: Voice): String {
-        val region = v.locale.displayCountry.ifBlank { v.locale.displayLanguage }
-        val code = v.name.substringAfter("-x-", v.name).substringBefore("-")
-        val where = if (v.isNetworkConnectionRequired) "online" else "offline"
-        val hq = if (v.quality >= Voice.QUALITY_VERY_HIGH) " ★" else ""
-        return "$region · $code · $where$hq"
+    private fun preview(engine: TextToSpeech, v: Voice?) {
+        try {
+            engine.stop()
+            if (v != null) engine.voice = v else engine.defaultVoice?.let { engine.voice = it }
+            engine.setSpeechRate(Settings.rateFor(this, book.id))
+            engine.speak("Hello! This is how I'll sound reading your book.", TextToSpeech.QUEUE_FLUSH, null, "preview")
+        } catch (e: Throwable) {
+            toast("Couldn't play a preview of that voice.")
+        }
     }
 
     private fun openTtsSettings() {

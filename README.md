@@ -45,13 +45,15 @@ An Android ebook reader that finds free, legal books and **reads them aloud** wi
 3. Windows may show *“Windows protected your PC”* because the app isn't code-signed. Click **More info → Run anyway**.
 
 The desktop app has the same library, cover shelf, search, reader, chapters, bookmarks and notes, collections, sleep timer, pronunciation fixes and themes. Extras on PC:
-- **Open in Edge:** opens your library in Microsoft Edge, which offers very natural “Online (Natural)” voices (marked ★). Keep the app running while you listen in Edge.
+- **Better voices:** opens your library in **Edge** (Microsoft's natural voices, marked ★) or **Chrome** (Google's voices). Keep the app running while you listen there.
+- **Readable voice names** like *Aria · English (US) · Female · Natural ★* or *Google · English (UK) · Male*. Choosing a voice plays a short preview.
+- **Export as MP3:** in a book, click **Export audio** to save a chapter or the whole book (one file per chapter) using Windows voices. Browsers don't allow recording the Edge or Google voices.
 - **Bring your phone library over:** on the phone use *Menu → Back up library*, copy the `.zip` to your PC, and drop it on the app window (or *Settings → Restore from backup*). Books, places, notes and collections come across.
 - **Keyboard:** <kbd>Space</kbd> play/pause, <kbd>←</kbd>/<kbd>→</kbd> paragraph, <kbd>Shift</kbd>+<kbd>←</kbd>/<kbd>→</kbd> chapter, <kbd>B</kbd> bookmark, <kbd>C</kbd> chapters, <kbd>Ctrl</kbd>+<kbd>F</kbd> search. Media keys work too.
 - **Drag and drop** EPUB, PDF or TXT files onto the window to add them.
 - Select a word to **define** it. Right-click a paragraph for bookmarks and notes.
 
-Audio export and Android Auto are phone-only.
+Android Auto is phone-only.
 
 ---
 
@@ -80,6 +82,7 @@ You can also **import** your own DRM-free **EPUB, PDF or TXT** files.
 
 ### Read aloud
 - Uses Android's text-to-speech, so **any voice installed on your phone** works, including Google's high-quality voices.
+- **Easy voice picker:** voices get readable names like *English (US) · Female 2* or *English (UK) · Male 1*, and tapping one plays a preview.
 - **Highlights each sentence** as it's spoken.
 - **Keeps playing in the background** with lock-screen, notification and headphone controls. Pauses for calls and when headphones are unplugged.
 - Speed from **0.75× to 3×**, and a choice of voice.
@@ -158,3 +161,5 @@ The app is plain Kotlin with the Android framework. Its only library is [pdfbox-
 | `Updater.kt` | In-app updates from GitHub Releases |
 | `CarModeActivity.kt` | Big-button car mode |
 | `Backup.kt` | Backup and restore, dictionary lookups |
+| `VoiceNames.kt` | Readable voice names |
+| `desktop/` | Windows app (Electron): `server.js` local library server, `ui/` screens, `lib/` extraction, sources, storage, MP3 export |

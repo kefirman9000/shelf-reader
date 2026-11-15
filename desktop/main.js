@@ -1,8 +1,10 @@
 'use strict';
 // Electron entry point: starts the local library server and shows it in a window.
 
-const { app, BrowserWindow, shell } = require('electron');
+const { app, BrowserWindow, shell, dialog } = require('electron');
 const path = require('path');
+const fs = require('fs');
+const { spawn } = require('child_process');
 const { startServer } = require('./server');
 
 let win = null;
@@ -21,12 +23,38 @@ if (!app.requestSingleInstanceLock()) {
       port: 47321,
       version: app.getVersion(),
       openExternal: (url) => shell.openExternal(url),
-      openEdge: (url) => shell.openExternal('microsoft-edge:' + url).catch(() => shell.openExternal(url))
+      openEdge: (url) => shell.openExternal('microsoft-edge:' + url).catch(() => shell.openExternal(url)),
+      findChrome,
+      openChrome: (url) => {
+        const exe = findChrome();
+        if (!exe) return false;
+        spawn(exe, [url], { detached: true, stdio: 'ignore' }).unref();
+        return true;
+      },
+      openPath: (p) => shell.openPath(p),
+      pickFolder: async () => {
+        const r = await dialog.showOpenDialog(win, {
+          title: 'Choose where to save the audio files',
+          defaultPath: app.getPath('music'),
+          properties: ['openDirectory', 'createDirectory']
+        });
+        return r.canceled || !r.filePaths.length ? null : r.filePaths[0];
+      }
     });
     createWindow();
   });
 
   app.on('window-all-closed', () => app.quit());
+}
+
+/** Locates Google Chrome on Windows (Google's voices only exist inside Chrome). */
+function findChrome() {
+  const roots = [process.env.PROGRAMFILES, process.env['PROGRAMFILES(X86)'], process.env.LOCALAPPDATA].filter(Boolean);
+  for (const r of roots) {
+    const p = path.join(r, 'Google', 'Chrome', 'Application', 'chrome.exe');
+    if (fs.existsSync(p)) return p;
+  }
+  return null;
 }
 
 function createWindow() {

@@ -512,19 +512,51 @@ function loadVoices() {
   fillVoiceSelect();
 }
 speechSynthesis.onvoiceschanged = loadVoices;
-function voiceName(v) {
-  return v.name.replace(/^Microsoft\s+/, '').replace(/\s*-\s*[^-]+$/, '') + (v.localService ? '' : ' (online)');
+// ---------- friendly voice names ----------
+const COUNTRY = { US: 'US', GB: 'UK', AU: 'Australia', IN: 'India', CA: 'Canada', IE: 'Ireland', NZ: 'New Zealand', ZA: 'South Africa',
+  SG: 'Singapore', PH: 'Philippines', HK: 'Hong Kong', KE: 'Kenya', NG: 'Nigeria', TZ: 'Tanzania', MX: 'Mexico', ES: 'Spain', FR: 'France', DE: 'Germany', BR: 'Brazil', PT: 'Portugal' };
+let langNames = null;
+function langLabel(tag) {
+  const [l, c] = String(tag || '').split(/[-_]/);
+  if (!langNames) { try { langNames = new Intl.DisplayNames(['en'], { type: 'language' }); } catch (_) { langNames = { of: (x) => x }; } }
+  let ln = l; try { ln = langNames.of(l) || l; } catch (_) {}
+  return c ? `${ln} (${COUNTRY[c.toUpperCase()] || c.toUpperCase()})` : ln;
 }
+// Common Microsoft voice first names → gender (Windows and Edge "Natural" voices)
+const MS_FEMALE = new Set(['aria', 'jenny', 'michelle', 'ana', 'ava', 'emma', 'sonia', 'libby', 'maisie', 'natasha', 'clara', 'neerja', 'emily', 'molly', 'leah', 'zira', 'hazel', 'susan', 'heera', 'linda', 'catherine', 'sara', 'nancy', 'jane', 'amber', 'ashley', 'cora', 'elizabeth', 'monica', 'luna', 'rosa', 'yan', 'sam', 'abbi', 'bella', 'hollie', 'olivia', 'annette', 'carly', 'elsie', 'freya', 'joanne', 'kim', 'tina', 'asilia', 'ezinne', 'imani', 'luna', 'mia', 'nova']);
+const MS_MALE = new Set(['guy', 'christopher', 'eric', 'roger', 'steffan', 'andrew', 'brian', 'davis', 'ryan', 'william', 'liam', 'prabhat', 'connor', 'mitchell', 'luke', 'david', 'mark', 'george', 'ravi', 'richard', 'sean', 'james', 'jacob', 'jason', 'tony', 'brandon', 'alfie', 'elliot', 'ethan', 'noah', 'oliver', 'thomas', 'darren', 'duncan', 'ken', 'neil', 'tim', 'abeo', 'chilemba', 'elimu', 'wayne', 'kai']);
+function voiceLabel(name, lang, extraGender) {
+  const n = String(name || '');
+  const where = langLabel(lang);
+  const g = (x) => (x ? ' · ' + x : '');
+  let m = /^Google\s+(.*?)(?:\s+(Female|Male))?$/i.exec(n);
+  if (m) {
+    // Chrome's voices: "Google US English" is a female voice; UK ones say so in the name
+    const gender = m[2] || (/^en-US$/i.test(lang) ? 'Female' : '');
+    return `Google · ${where}${g(gender)}`;
+  }
+  m = /^Microsoft\s+([A-Za-z]+)(?:Multilingual)?\b(.*)$/i.exec(n);
+  if (m) {
+    const first = m[1];
+    const k = first.toLowerCase();
+    const gender = extraGender || (MS_FEMALE.has(k) ? 'Female' : MS_MALE.has(k) ? 'Male' : '');
+    const natural = /natural|online/i.test(m[2]);
+    return `${first} · ${where}${g(gender)}${natural ? ' · Natural ★' : ''}`;
+  }
+  return `${n.replace(/\s*-\s*[^-]+$/, '')}${where ? ' · ' + where : ''}${g(extraGender)}`;
+}
+function voiceName(v) { return voiceLabel(v.name, v.lang); }
+const isGreatVoice = (v) => /natural|^google/i.test(v.name);
 function fillVoiceSelect() {
   const sel = $('#voiceSel'); if (!sel) return;
   const lang = (navigator.language || 'en').slice(0, 2);
   const vs = S.voices.filter((v) => v.lang.toLowerCase().startsWith(lang))
-    .sort((a, b) => (/natural/i.test(b.name) - /natural/i.test(a.name)) || a.name.localeCompare(b.name));
+    .sort((a, b) => (isGreatVoice(b) - isGreatVoice(a)) || voiceName(a).localeCompare(voiceName(b)));
   const others = S.voices.filter((v) => !vs.includes(v));
   const cur = currentVoiceName();
   sel.innerHTML = `<option value="">Default voice</option>` +
-    vs.map((v) => `<option value="${esc(v.name)}">${esc(voiceName(v))}${/natural/i.test(v.name) ? ' ★' : ''}</option>`).join('') +
-    (others.length ? `<optgroup label="Other languages">${others.map((v) => `<option value="${esc(v.name)}">${esc(voiceName(v))} · ${esc(v.lang)}</option>`).join('')}</optgroup>` : '');
+    vs.map((v) => `<option value="${esc(v.name)}">${esc(voiceName(v))}</option>`).join('') +
+    (others.length ? `<optgroup label="Other languages">${others.map((v) => `<option value="${esc(v.name)}">${esc(voiceName(v))}</option>`).join('')}</optgroup>` : '');
   sel.value = S.voices.some((v) => v.name === cur) ? cur : '';
 }
 const currentVoiceName = () => (S.bookState && S.bookState.voice !== undefined ? S.bookState.voice : S.settings.voice) || '';
@@ -540,7 +572,16 @@ $('#voiceSel').onchange = async (e) => {
   const v = e.target.value || null;
   await saveState({ voice: v }); saveSettings({ voice: v });
   if (S.playing) speakFrom(S.segIdx);
+  else previewVoice(v);
 };
+function previewVoice(name) {
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance('Hello! This is how I will sound reading your book.');
+  const v = S.voices.find((x) => x.name === name);
+  if (v) { u.voice = v; u.lang = v.lang; }
+  u.rate = currentRate();
+  speechSynthesis.speak(u);
+}
 
 function setupPlayer() {
   $('#player').hidden = false;
@@ -765,7 +806,7 @@ function openSettings() {
     <div class="setrow"><label>Text size</label><input type="range" id="sSize" min="13" max="34" value="${s.textSize || 19}" style="flex:1"></div>
     <h3>Reading aloud</h3>
     <label class="check"><input type="checkbox" id="sClutter" ${s.skipClutter !== false ? 'checked' : ''}> Skip page numbers, footnote markers, links and scan notices</label>
-    <p class="muted">Best voices: ${S.info.edge ? 'click <b>Open in Edge</b> at the top. Edge has very natural “Online (Natural)” voices that you can pick in the voice menu. ' : 'in Microsoft Edge, pick a voice marked ★ “Natural”. '}
+    <p class="muted">Best voices: ${S.info.edge ? 'click <b>Better voices</b> at the top to open your library in Edge (Microsoft “Natural ★” voices) or Chrome (Google voices). ' : 'in Edge pick a voice marked “Natural ★”; in Chrome pick a “Google” voice. '}
       In this window, voices come from Windows (Settings → Time &amp; language → Speech → Add voices).</p>
     <h3>Pronunciation fixes</h3>
     <div id="fixList">${(s.fixes || []).map((f, i) => `<div class="fix"><span style="flex:1"><b>${esc(f.from)}</b> → ${esc(f.to || '(skip)')}</span><button class="danger" data-fx="${i}">Delete</button></div>`).join('') || '<p class="muted">None yet.</p>'}</div>
@@ -815,11 +856,70 @@ async function checkUpdates() {
 }
 
 // ---------- Edge ----------
-$('#edgeBtn').onclick = async () => {
-  if (S.playing) pause();
-  try { await api('/api/open-edge', { method: 'POST' }); toast('Opened in Edge. Pick a ★ Natural voice there. Keep this app open while you listen.', 7000); }
-  catch (e) { toast(e.message); }
+$('#edgeBtn').onclick = (e) => {
+  const r = e.target.getBoundingClientRect();
+  const open = async (which) => {
+    if (S.playing) pause();
+    try {
+      await api('/api/open-' + which, { method: 'POST' });
+      toast(which === 'edge'
+        ? 'Opened in Edge. Pick a voice marked “Natural ★” in the voice menu. Keep this app open while you listen.'
+        : 'Opened in Chrome. Pick a “Google” voice in the voice menu. Keep this app open while you listen.', 8000);
+    } catch (err) { toast(err.message, 6000); }
+  };
+  showMenu(r.left, r.bottom + 4, [
+    ['Open in Edge: Microsoft natural voices', () => open('edge')],
+    ['Open in Chrome: Google voices', () => open('chrome')]
+  ]);
 };
+
+// ---------- audio export (Windows app) ----------
+$('#exportBtn').onclick = async () => {
+  if (!S.book) return;
+  let voices = [];
+  try { voices = await api('/api/export/voices'); } catch (_) {}
+  const cur = chapterIndex(curPara());
+  const nCh = Math.max(1, S.chapters.length);
+  modal(`<h2>Export as MP3</h2>
+    <p class="muted">Saves audio files (one per chapter) to a folder you choose, for any music player or phone.
+    Exports use the voices installed in Windows. Browsers don't allow recording the Edge or Google voices.</p>
+    <div class="setrow"><label>What</label><select id="xWhat">
+      ${S.chapters.length ? `<option value="cur">This chapter: ${esc(S.chapters[Math.max(0, cur)].title)}</option>` : ''}
+      <option value="all">Whole book (${nCh} file${nCh === 1 ? '' : 's'})</option></select></div>
+    <div class="setrow"><label>Voice</label><select id="xVoice">${voices.length
+      ? voices.map((v) => `<option value="${esc(v.name)}">${esc(voiceLabel(v.name, v.lang, v.gender && v.gender !== 'NotSet' ? v.gender : ''))}</option>`).join('')
+      : '<option value="">Windows default voice</option>'}</select></div>
+    <div class="setrow"><label>Speed</label><select id="xRate">${RATES.map((r) => `<option value="${r}" ${r === currentRate() ? 'selected' : ''}>${r}×</option>`).join('')}</select></div>
+    <p class="muted">More Windows voices: Settings → Time &amp; language → Speech → Add voices.</p>`,
+  [['Cancel'], ['Choose folder & export', async () => {
+    const what = $('#xWhat').value;
+    const body = { bookId: S.book.id, voice: $('#xVoice').value || null, rate: +$('#xRate').value,
+      from: what === 'cur' ? Math.max(0, cur) : 0, to: what === 'cur' ? Math.max(0, cur) : 9999 };
+    try {
+      const r = await api('/api/export', { method: 'POST', json: body });
+      if (r.started) watchExport();
+    } catch (e) { toast(e.message, 6000); }
+  }, true]]);
+};
+function watchExport() {
+  const tick = async () => {
+    let j; try { j = await api('/api/export'); } catch (_) { return; }
+    if (j.running) {
+      $('#toast').hidden = false;
+      $('#toast').innerHTML = `Exporting “${esc(j.title)}”: ${j.done}/${j.total || '?'} files${j.current ? ' · ' + esc(j.current) : ''} <button id="xCancel" style="margin-left:10px">Cancel</button>`;
+      $('#xCancel').onclick = () => api('/api/export/cancel', { method: 'POST' });
+      clearTimeout(toastTimer);
+      setTimeout(tick, 1500);
+    } else if (j.finished) {
+      $('#toast').hidden = true;
+      modal(`<h2>Export finished</h2><p>Saved ${j.total} MP3 file${j.total === 1 ? '' : 's'} to:<br><span class="muted">${esc(j.folder)}</span></p>`,
+        [['Close'], ['Open folder', () => api('/api/export/open', { method: 'POST' }), true]]);
+    } else {
+      toast(j.error ? 'Export: ' + j.error : 'Export stopped.', 7000);
+    }
+  };
+  tick();
+}
 
 // ---------- start ----------
 (async function init() {
@@ -827,12 +927,14 @@ $('#edgeBtn').onclick = async () => {
   S.settings = await api('/api/settings');
   buildFixRules();
   applyAppearance();
-  $('#edgeBtn').hidden = !S.info.edge || /Edg\//.test(navigator.userAgent);
+  // Only in the app window itself (not when already opened in Edge or Chrome)
+  $('#edgeBtn').hidden = !S.info.edge || !/Electron/.test(navigator.userAgent);
+  $('#exportBtn').hidden = !S.info.export;
   loadVoices();
   await renderLibrary();
-  if (/Edg\//.test(navigator.userAgent) === false && S.info.edge && !S.settings.seenTip) {
+  if (/Electron/.test(navigator.userAgent) && S.info.edge && !S.settings.seenTip) {
     saveSettings({ seenTip: true });
-    toast('Tip: “Open in Edge” gives you Microsoft’s most natural voices.', 7000);
+    toast('Tip: “Better voices” opens your library in Edge (Microsoft natural voices) or Chrome (Google voices).', 8000);
   }
   if (S.settings.lastBook && bookById(S.settings.lastBook)) {
     try { await loadBook(S.settings.lastBook); } catch (_) {}
