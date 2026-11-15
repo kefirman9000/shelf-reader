@@ -61,6 +61,26 @@ Your book never leaves your device, except when you choose a premium voice. That
 
 **Hosting it as a web page:** GitHub Pages needs a public repository (or a paid plan for private ones). Go to **Settings → Pages**, choose **Deploy from a branch**, pick `main` and `/ (root)`, and the maker will be at `https://<your-user>.github.io/shelf-reader/`. Making the repository public also lets the apps' **Check for updates** button work.
 
+## Natural reading and getting around
+
+These work on the phone, on the PC, and in the audiobook maker.
+
+- **Says things like a narrator.** "Chapter XII" becomes "Chapter Twelve", Henry VIII becomes "Henry the Eighth", and the word "I" is left alone. The same goes for 1850s, $4.50, 3:30 pm, 22nd, Dr. (Doctor or Drive) and St. (Saint or Street).
+- **Pauses that follow punctuation.** Semicolons, colons, dashes, "…" and brackets each get their own pause. Sentences end with a pause that fits ? ! or a full stop. Paragraph ends pause a little longer and chapter ends longer still. The pace varies very slightly so long sessions don't sound mechanical.
+- **Chapter openings like an audiobook.** "CHAPTER XII. THE STORM" is announced as "Chapter Twelve" … "The Storm" … and the heading isn't read twice. Running headers and page numbers are skipped.
+- **Smarter chapter lists.** Books with no chapters, or a useless list (every page a "chapter"), get one built from their headings. Roman numerals, PART ONE, Book II and similar are recognized, and chapters are nested under parts.
+- **Getting around:**
+  - ↺15 / 30↻ skip back 15 or forward 30 seconds.
+  - **Repeat** the last sentence: double-click ↺15 on PC, long-press on the phone, or press R.
+  - **Places you jumped from** lets you undo an accidental jump (🕘 or H on PC, menu on the phone).
+  - **Go to** a percentage with a slider that shows chapter names (G on PC).
+  - Media keys and car controls skip chapters. On the phone, the headset button does play/pause on one press, next chapter on two and back 15 seconds on three. The lock screen and car show the current chapter.
+- **Search inside all your books** and tap a result to start listening there.
+- **Up next.** Queue books so the next one starts when one finishes.
+- **Bookmarks with audio clips.** Save a sentence along with a recording of it in your voice of choice, then play or share it.
+- **About this book.** See its description, subjects and first publication date, plus more free books by the author or on the same subject.
+- **One pronunciation list.** Your fixes sync between the phone and the PC, and the audiobook maker can load them from the sync file.
+
 ## Install
 
 ### Android
