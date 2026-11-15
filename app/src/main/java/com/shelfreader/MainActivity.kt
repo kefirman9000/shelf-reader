@@ -71,17 +71,24 @@ class MainActivity : Activity() {
     private lateinit var libraryEmpty: TextView
     private lateinit var continueBar: View
     private lateinit var continueText: TextView
-    private lateinit var viewBtn: Button
-    private lateinit var sortBtn: Button
-    private lateinit var filterBtn: Button
+    private lateinit var viewBtn: TextView
+    private lateinit var sortBtn: TextView
+    private lateinit var filterBtn: TextView
     private var shelfAdapter: ShelfAdapter? = null
     private var pendingCoverBook: String? = null
     private lateinit var searchPane: View
     private lateinit var searchBox: EditText
     private lateinit var searchStatus: TextView
     private lateinit var resultsList: ListView
-    private lateinit var tabLibrary: Button
-    private lateinit var tabSearch: Button
+    private lateinit var tabs: List<LinearLayout>
+    private lateinit var topTitle: TextView
+    private lateinit var settingsPane: android.widget.ScrollView
+    private lateinit var emptyBox: LinearLayout
+    private lateinit var continueCover: ImageView
+    private lateinit var continueSub: TextView
+    private lateinit var continueProgress: ProgressBar
+    private lateinit var continuePlayBtn: TextView
+    private var tab = 0
 
     private var books: List<Book> = emptyList()
     private val results = ArrayList<SearchResult>()
@@ -102,77 +109,76 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        window.statusBarColor = UiColors.SURFACE
+        window.navigationBarColor = UiColors.SURFACE
+        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(UiColors.BG) }
 
-        val tabs = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        tabLibrary = Button(this).apply { text = "Library"; setOnClickListener { showTab(false) } }
-        tabSearch = Button(this).apply { text = "Find books"; setOnClickListener { showTab(true) } }
-        val importBtn = Button(this).apply { text = "Import"; setOnClickListener { pickFile() } }
-        for (b in listOf(tabLibrary, tabSearch, importBtn)) {
-            tabs.addView(b, LinearLayout.LayoutParams(0, WRAP, 1f))
-        }
-        root.addView(tabs)
+        // top bar
+        val (bar0, titles) = topBar("Shelf Reader", null,
+            "🔎" to ("Search inside your books" to { searchBooks() }),
+            "＋" to ("Add a book from your phone" to { pickFile() }))
+        topTitle = titles.first
+        root.addView(bar0)
 
-        // Library pane: continue bar, view/sort bar, then shelf/grid/list
+        // Library pane: continue card, chips, then shelf/grid/list
         val lib = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
 
-        continueText = TextView(this).apply {
-            textSize = 15f
-            maxLines = 2
-            setPadding(dp(16), dp(10), dp(8), dp(10))
+        continueCover = ImageView(this).apply { scaleType = ImageView.ScaleType.CENTER_CROP; background = roundBg(UiColors.SURFACE2, 6) ; clipToOutline = true }
+        continueText = TextView(this).apply { textSize = 16f; maxLines = 2; setTextColor(UiColors.FG); setTypeface(typeface, android.graphics.Typeface.BOLD) }
+        continueSub = TextView(this).apply { textSize = 13f; maxLines = 1; setTextColor(UiColors.MUTED) }
+        continueProgress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply { max = 100; progressTintList = android.content.res.ColorStateList.valueOf(UiColors.ACCENT) }
+        val texts = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; setPadding(dp(14), 0, dp(10), 0)
+            addView(TextView(this@MainActivity).apply { text = "CONTINUE LISTENING"; textSize = 11f; letterSpacing = 0.08f; setTextColor(UiColors.ACCENT) })
+            addView(continueText); addView(continueSub)
+            addView(continueProgress, LinearLayout.LayoutParams(MATCH, dp(10)).apply { topMargin = dp(6) })
         }
-        val continuePlay = Button(this).apply { text = "▶ Play" }
+        val continuePlay = iconBtn("▶", "Play", 60, filled = true) {
+            Settings.lastBook(this)?.let { id ->
+                val s = TtsService.instance
+                if (s != null && s.bookId == id && s.playing) { s.pause(); refreshLibrary(); return@let }
+                startForegroundService(Intent(this, TtsService::class.java).setAction(TtsService.ACTION_PLAY).putExtra(TtsService.EXTRA_BOOK, id))
+                toast("Reading aloud. The controls are also in your notifications.")
+                libraryGrid.postDelayed({ refreshLibrary() }, 800)
+            }
+        }
+        continuePlayBtn = continuePlay
         continueBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setBackgroundColor(0x2266AAFF)
-            addView(continueText, LinearLayout.LayoutParams(0, WRAP, 1f))
+            background = roundBg(UiColors.SURFACE, 16)
+            setPadding(dp(12), dp(12), dp(12), dp(12))
+            addView(continueCover, LinearLayout.LayoutParams(dp(54), dp(78)))
+            addView(texts, LinearLayout.LayoutParams(0, WRAP, 1f))
             addView(continuePlay)
+            setOnClickListener { Settings.lastBook(this@MainActivity)?.let { id -> Library.get(this@MainActivity, id)?.let { openBook(it) } } }
         }
-        continueText.setOnClickListener { Settings.lastBook(this)?.let { id -> Library.get(this, id)?.let { openBook(it) } } }
-        continuePlay.setOnClickListener {
-            Settings.lastBook(this)?.let { id ->
-                startForegroundService(
-                    Intent(this, TtsService::class.java).setAction(TtsService.ACTION_PLAY).putExtra(TtsService.EXTRA_BOOK, id)
-                )
-                toast("Reading aloud. Controls are in your notifications.")
-            }
-        }
-        lib.addView(continueBar)
+        lib.addView(continueBar, LinearLayout.LayoutParams(MATCH, WRAP).apply { setMargins(dp(12), dp(12), dp(12), dp(4)) })
 
-        val bar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        viewBtn = Button(this).apply {
-            setOnClickListener {
-                AlertDialog.Builder(this@MainActivity).setTitle("Library view")
-                    .setItems(VIEW_NAMES.toTypedArray()) { _, w -> Settings.setLibraryView(this@MainActivity, w); refreshLibrary() }
-                    .show()
-            }
+        val bar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(dp(12), dp(8), dp(12), dp(8)) }
+        filterBtn = chip("All books ▾") {
+            val names = listOf("All books") + Collections.names(this@MainActivity) + "Manage collections…"
+            AlertDialog.Builder(this@MainActivity).setTitle("Show")
+                .setItems(names.toTypedArray()) { _, w ->
+                    when (w) {
+                        0 -> Settings.setLibraryFilter(this@MainActivity, "")
+                        names.size - 1 -> { manageCollections(); return@setItems }
+                        else -> Settings.setLibraryFilter(this@MainActivity, names[w])
+                    }
+                    refreshLibrary()
+                }.show()
         }
-        sortBtn = Button(this).apply {
-            setOnClickListener {
-                AlertDialog.Builder(this@MainActivity).setTitle("Sort by")
-                    .setItems(SORT_NAMES.toTypedArray()) { _, w -> Settings.setLibrarySort(this@MainActivity, w); refreshLibrary() }
-                    .show()
-            }
+        viewBtn = chip("Grid ▾") {
+            AlertDialog.Builder(this@MainActivity).setTitle("Library view")
+                .setItems(VIEW_NAMES.toTypedArray()) { _, w -> Settings.setLibraryView(this@MainActivity, w); refreshLibrary() }.show()
         }
-        filterBtn = Button(this).apply {
-            setOnClickListener {
-                val names = listOf("All books") + Collections.names(this@MainActivity) + "Manage collections…"
-                AlertDialog.Builder(this@MainActivity).setTitle("Show")
-                    .setItems(names.toTypedArray()) { _, w ->
-                        when (w) {
-                            0 -> Settings.setLibraryFilter(this@MainActivity, "")
-                            names.size - 1 -> { manageCollections(); return@setItems }
-                            else -> Settings.setLibraryFilter(this@MainActivity, names[w])
-                        }
-                        refreshLibrary()
-                    }.show()
-            }
+        sortBtn = chip("Recent ▾") {
+            AlertDialog.Builder(this@MainActivity).setTitle("Sort by")
+                .setItems(SORT_NAMES.toTypedArray()) { _, w -> Settings.setLibrarySort(this@MainActivity, w); refreshLibrary() }.show()
         }
-        bar.addView(filterBtn, LinearLayout.LayoutParams(0, WRAP, 1.2f))
-        bar.addView(viewBtn, LinearLayout.LayoutParams(0, WRAP, 1f))
-        bar.addView(sortBtn, LinearLayout.LayoutParams(0, WRAP, 1f))
-        lib.addView(bar)
+        val gap = { LinearLayout.LayoutParams(WRAP, WRAP).apply { rightMargin = dp(8) } }
+        bar.addView(filterBtn, gap()); bar.addView(viewBtn, gap()); bar.addView(sortBtn, gap())
+        lib.addView(android.widget.HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(bar) })
 
         val holder = FrameLayout(this)
         libraryGrid = GridView(this).apply {
@@ -186,11 +192,20 @@ class MainActivity : Activity() {
             text = emptyText
             gravity = Gravity.CENTER
             textSize = 16f
-            setPadding(dp(32), dp(32), dp(32), dp(32))
+            setTextColor(UiColors.MUTED)
+            setPadding(dp(32), dp(32), dp(32), dp(12))
+        }
+        emptyBox = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            addView(TextView(this@MainActivity).apply { text = "📚"; textSize = 56f; gravity = Gravity.CENTER })
+            addView(libraryEmpty)
+            addView(pill("Find free books", true) { showTab(1) }, LinearLayout.LayoutParams(dp(240), WRAP).apply { bottomMargin = dp(10) })
+            addView(pill("Add a book from your phone") { pickFile() }, LinearLayout.LayoutParams(dp(240), WRAP))
         }
         holder.addView(libraryGrid, FrameLayout.LayoutParams(MATCH, MATCH))
         holder.addView(libraryList, FrameLayout.LayoutParams(MATCH, MATCH))
-        holder.addView(libraryEmpty, FrameLayout.LayoutParams(MATCH, MATCH))
+        holder.addView(emptyBox, FrameLayout.LayoutParams(MATCH, MATCH))
         lib.addView(holder, LinearLayout.LayoutParams(MATCH, 0, 1f))
         libraryPane = lib
 
@@ -198,22 +213,27 @@ class MainActivity : Activity() {
         val search = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            setPadding(dp(8), dp(4), dp(8), 0)
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12), dp(12), dp(12), 0)
         }
         searchBox = EditText(this).apply {
-            hint = "Title or author"
+            setTextColor(UiColors.FG); setHintTextColor(UiColors.MUTED)
+            background = roundBg(UiColors.SURFACE2, 22, UiColors.LINE)
+            setPadding(dp(16), dp(10), dp(16), dp(10))
+            textSize = 16f
+            hint = "Search by title or author"
             isSingleLine = true
             imeOptions = EditorInfo.IME_ACTION_SEARCH
             setOnEditorActionListener { _, id, _ ->
                 if (id == EditorInfo.IME_ACTION_SEARCH) { doSearch(); true } else false
             }
         }
-        val go = Button(this).apply { text = "Search"; setOnClickListener { doSearch() } }
-        row.addView(searchBox, LinearLayout.LayoutParams(0, WRAP, 1f))
+        val go = pill("Search", true) { doSearch() }
+        row.addView(searchBox, LinearLayout.LayoutParams(0, WRAP, 1f).apply { rightMargin = dp(8) })
         row.addView(go)
         searchStatus = TextView(this).apply {
-            setPadding(dp(16), dp(4), dp(16), dp(8))
-            alpha = 0.8f
+            setPadding(dp(18), dp(10), dp(18), dp(8))
+            setTextColor(UiColors.MUTED); textSize = 13f
             text = "Searches free, legal sources: Project Gutenberg, Standard Ebooks, the Internet Archive " +
                 "(public-domain and open-access books), Open Library, Wikisource and Feedbooks."
         }
@@ -223,10 +243,28 @@ class MainActivity : Activity() {
         search.addView(resultsList, LinearLayout.LayoutParams(MATCH, 0, 1f))
         searchPane = search
 
+        settingsPane = android.widget.ScrollView(this)
         val content = FrameLayout(this)
         content.addView(libraryPane, FrameLayout.LayoutParams(MATCH, MATCH))
         content.addView(searchPane, FrameLayout.LayoutParams(MATCH, MATCH))
+        content.addView(settingsPane, FrameLayout.LayoutParams(MATCH, MATCH))
         root.addView(content, LinearLayout.LayoutParams(MATCH, 0, 1f))
+
+        // bottom tabs
+        val nav = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setBackgroundColor(UiColors.SURFACE); setPadding(0, dp(4), 0, dp(4)) }
+        tabs = listOf("📚" to "Library", "🌐" to "Find books", "⚙" to "Settings").mapIndexed { k, (icon, label) ->
+            LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                setPadding(0, dp(6), 0, dp(6))
+                background = roundBg(0x00000000, 12)
+                isClickable = true
+                addView(TextView(this@MainActivity).apply { text = icon; textSize = 20f; gravity = Gravity.CENTER })
+                addView(TextView(this@MainActivity).apply { text = label; textSize = 12f; gravity = Gravity.CENTER })
+                setOnClickListener { showTab(k) }
+            }.also { nav.addView(it, LinearLayout.LayoutParams(0, WRAP, 1f)) }
+        }
+        root.addView(nav)
         setContentView(root)
 
         val open = AdapterView.OnItemClickListener { _, _, pos, _ -> openBook(books[pos]) }
@@ -242,7 +280,7 @@ class MainActivity : Activity() {
         ) {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
         }
-        showTab(false)
+        showTab(0)
 
         if (System.currentTimeMillis() - Settings.lastUpdateCheck(this) > 6 * 60 * 60 * 1000L) checkUpdates(false)
         if (!Settings.seenVoiceGuide(this)) showVoiceGuide(this)
@@ -250,7 +288,7 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-        if (!showingSearch) refreshLibrary()
+        if (tab == 0) refreshLibrary() else if (tab == 2) buildSettings()
         if (Settings.syncUri(this) != null && System.currentTimeMillis() - Settings.lastSync(this) > 60_000) runSync(false)
     }
 
@@ -261,27 +299,7 @@ class MainActivity : Activity() {
 
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
-        if (showingSearch) showTab(false) else super.onBackPressed()
-    }
-
-    override fun onCreateOptionsMenu(menu: Menu): Boolean {
-        menu.add(0, 1, 0, "Pronunciation fixes")
-        menu.add(0, 3, 0, "Voice setup guide")
-        menu.add(0, 4, 0, "Resume when headphones connect").setCheckable(true).isChecked = Settings.resumeOnHeadphones(this)
-        menu.add(0, 5, 0, "Back up library…")
-        menu.add(0, 6, 0, "Restore from backup…")
-        menu.add(0, 7, 0, "Reading stats")
-        menu.add(0, 9, 0, "Search inside your books…")
-        menu.add(0, 10, 0, "Up next…")
-        menu.add(0, 8, 0, if (Settings.syncUri(this) == null) "Sync with PC…" else "Sync with PC (on)…")
-        menu.add(0, 2, 0, "Check for updates")
-        return true
-    }
-
-    override fun onPrepareOptionsMenu(menu: Menu): Boolean {
-        menu.findItem(4)?.isChecked = Settings.resumeOnHeadphones(this)
-        menu.findItem(8)?.title = if (Settings.syncUri(this) == null) "Sync with PC…" else "Sync with PC (on)…"
-        return super.onPrepareOptionsMenu(menu)
+        if (tab != 0) showTab(0) else super.onBackPressed()
     }
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
@@ -374,13 +392,78 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun showTab(search: Boolean) {
-        showingSearch = search
-        searchPane.visibility = if (search) View.VISIBLE else View.GONE
-        libraryPane.visibility = if (search) View.GONE else View.VISIBLE
-        tabSearch.alpha = if (search) 1f else 0.55f
-        tabLibrary.alpha = if (search) 0.55f else 1f
-        if (search) searchBox.requestFocus() else refreshLibrary()
+    private fun showTab(k: Int) {
+        tab = k
+        showingSearch = k == 1
+        libraryPane.visibility = if (k == 0) View.VISIBLE else View.GONE
+        searchPane.visibility = if (k == 1) View.VISIBLE else View.GONE
+        settingsPane.visibility = if (k == 2) View.VISIBLE else View.GONE
+        tabs.forEachIndexed { i, t ->
+            val on = i == k
+            t.alpha = if (on) 1f else 0.6f
+            (t.getChildAt(1) as TextView).setTextColor(if (on) UiColors.ACCENT else UiColors.MUTED)
+            t.background = roundBg(if (on) 0x2256B394 else 0x00000000, 14)
+        }
+        topTitle.text = listOf("Shelf Reader", "Find free books", "Settings")[k]
+        when (k) { 0 -> refreshLibrary(); 1 -> searchBox.requestFocus(); 2 -> buildSettings() }
+    }
+
+    // ---------- settings: every option in one clear place ----------
+    private fun buildSettings() {
+        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, 0, 0, dp(24)) }
+        fun add(v: View) = col.addView(v)
+        val svc = { TtsService.instance?.applySettings(true) }
+        add(sectionTitle("Voice & audio"))
+        add(settingRow("🗣", "Voice and speed", "Default voice for new books, and how fast it reads. Each book can also have its own (in the player).") { defaultVoiceDialog() })
+        add(settingRow("✨", "Get better voices", "Install natural Google voices, step by step") { showVoiceGuide(this) })
+        add(settingRow("🔤", "Pronunciations", "Fix names or words the voice says wrong") { editPronunciations { svc() } })
+        add(settingRow("⏸", "Natural pauses", "Pause by punctuation, longer between paragraphs, chapter headings announced", Settings.naturalPauses(this)) { Settings.setNaturalPauses(this, it?.isChecked == true); svc() })
+        add(settingRow("🔢", "Say numbers properly", "“Chapter XII” → “Chapter Twelve”, Henry VIII, 1850s, $4.50, Dr., St.", Settings.speakNumbers(this)) { Settings.setSpeakNumbers(this, it?.isChecked == true); svc() })
+        add(settingRow("✂", "Skip page numbers & clutter", "Page numbers, running headers, footnote markers, links", Settings.skipClutter(this)) { Settings.setSkipClutter(this, it?.isChecked == true); svc() })
+        add(settingRow("🎧", "Resume with headphones", "Continue a paused book when headphones connect", Settings.resumeOnHeadphones(this)) { Settings.setResumeOnHeadphones(this, it?.isChecked == true) })
+        add(settingRow("⚙", "Android text-to-speech settings", "Speech engine, language packs and default rate") { openTtsSettingsScreen() })
+        add(sectionTitle("Your books"))
+        add(settingRow("⏭", "Up next", "Books that play one after another (${Settings.queue(this).size})") { showQueue() })
+        add(settingRow("🔎", "Search inside your books", "Find a word or phrase in every book and listen from there") { searchBooks() })
+        add(settingRow("📊", "Reading stats", "Daily goal, streak and finished books") { showStats(this) })
+        add(settingRow("🗂", "Collections", "Delete collections you made") { manageCollections() })
+        add(sectionTitle("Sync & backup"))
+        add(settingRow("🔄", "Sync with PC", if (Settings.syncUri(this) != null) "On · keeps your place, notes and stats in step with the PC app" else "Off · keep your place and notes the same on your PC") { syncMenu() })
+        add(settingRow("💾", "Back up library", "Save books, places and notes to one file") { backupLibrary() })
+        add(settingRow("📥", "Restore from backup", "Bring back a backup file") { restoreLibrary() })
+        add(sectionTitle("App"))
+        add(settingRow("⬆", "Check for updates", "You have build ${Updater.currentBuild(this)}") { checkUpdates(true) })
+        settingsPane.removeAllViews()
+        settingsPane.addView(col)
+    }
+
+    private fun defaultVoiceDialog() {
+        val rates = listOf(0.75f, 0.9f, 1f, 1.1f, 1.25f, 1.5f, 1.75f, 2f)
+        AlertDialog.Builder(this).setTitle("Default speed for new books")
+            .setItems(rates.map { (if (it == 1f) "Normal" else "${it}×") + if (it == Settings.rate(this)) "  ✓" else "" }.toTypedArray()) { _, w ->
+                Settings.setRate(this, rates[w]); TtsService.instance?.applySettings(true); toast("Default speed set. Open a book to choose its voice.")
+            }.setNeutralButton("Choose voices in a book") { _, _ -> toast("Open a book, then tap 🗣 Voice in the player.") }
+            .show()
+    }
+
+    private fun openTtsSettingsScreen() {
+        try { startActivity(Intent("com.android.settings.TTS_SETTINGS")) } catch (e: Throwable) { toast("Couldn't open the speech settings") }
+    }
+
+    private fun backupLibrary() {
+        val name = "ShelfReader-backup-" + SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date()) + ".zip"
+        try {
+            @Suppress("DEPRECATION")
+            startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/zip").putExtra(Intent.EXTRA_TITLE, name), 45)
+        } catch (e: Throwable) { toast("No file picker available") }
+    }
+
+    private fun restoreLibrary() {
+        try {
+            @Suppress("DEPRECATION")
+            startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*")
+                .putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream")), 46)
+        } catch (e: Throwable) { toast("No file picker available") }
     }
 
     private val emptyText = "No books yet.\n\nTap “Find books” to search Project Gutenberg, Standard Ebooks, the Internet Archive, " +
@@ -416,9 +499,9 @@ class MainActivity : Activity() {
             else -> shown.sortedByDescending { maxOf(Library.opened(this, it.id), it.added) }
         }
         val mode = Settings.libraryView(this).coerceIn(0, 2)
-        viewBtn.text = "View: ${VIEW_NAMES[mode]}"
-        sortBtn.text = "Sort: ${SORT_NAMES[Settings.librarySort(this).coerceIn(0, 3)]}"
-        libraryEmpty.visibility = if (books.isEmpty()) View.VISIBLE else View.GONE
+        viewBtn.text = "${VIEW_NAMES[mode]} ▾"
+        sortBtn.text = "${SORT_NAMES[Settings.librarySort(this).coerceIn(0, 3)]} ▾"
+        emptyBox.visibility = if (books.isEmpty()) View.VISIBLE else View.GONE
         if (books.isEmpty() && all.isNotEmpty()) libraryEmpty.text = "No books in “$filter” yet.\n\nLong-press a book → Collections… to add it."
         else libraryEmpty.text = emptyText
 
@@ -444,7 +527,16 @@ class MainActivity : Activity() {
         // "Continue" bar for the last book you were reading
         val last = Settings.lastBook(this)?.let { id -> all.firstOrNull { it.id == id } }
         continueBar.visibility = if (last != null) View.VISIBLE else View.GONE
-        if (last != null) continueText.text = "Continue “${last.title}” · ${Library.percent(this, last)}%"
+        if (last != null) {
+            val pct = Library.percent(this, last)
+            continueText.text = last.title
+            continueSub.text = "${last.author.ifBlank { "Unknown author" }} · $pct%"
+            continueProgress.progress = pct
+            val bmp = Covers.get(this, last) { runOnUiThread { refreshLibrary() } }
+            if (bmp != null) continueCover.setImageBitmap(bmp) else continueCover.setImageDrawable(ColorDrawable(Covers.color(last)))
+            val playing = TtsService.instance?.let { it.bookId == last.id && it.playing } == true
+            continuePlayBtn.text = if (playing) "❚❚" else "▶"
+        }
     }
 
     private fun openBook(b: Book) {
@@ -1005,7 +1097,7 @@ class MainActivity : Activity() {
             else -> null
         }
         if (fmt == null) { toast("Only EPUB, PDF and TXT files are supported."); return }
-        showTab(false)
+        showTab(0)
         toast("Importing “$name”…")
         pool.execute {
             val id = "b" + System.currentTimeMillis()

@@ -56,8 +56,16 @@ class ReaderActivity : Activity(), BookPageView.Host {
     private lateinit var list: ListView
     private lateinit var bookView: BookPageView
     private lateinit var controls: LinearLayout
-    private lateinit var playBtn: Button
-    private lateinit var speedBtn: Button
+    private lateinit var topBarView: LinearLayout
+    private lateinit var playBtn: TextView
+    private lateinit var speedBtn: TextView
+    private lateinit var layoutChip: TextView
+    private lateinit var seek: android.widget.SeekBar
+    private lateinit var seekLabel: TextView
+    private var seeking = false
+    private var pinching = false
+    private var pinchCancelSent = false
+    private var pinchSize = 18f
     private lateinit var status: TextView
     private lateinit var recap: TextView
     private lateinit var jumpBar: TextView
@@ -163,14 +171,15 @@ class ReaderActivity : Activity(), BookPageView.Host {
         bookMode = Settings.layout(this) == "book"
         loadAppearance()
 
+        window.statusBarColor = UiColors.SURFACE
+        window.navigationBarColor = UiColors.SURFACE
         root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        status = TextView(this).apply {
-            setPadding(dp(18), dp(4), dp(18), dp(4))
-            textSize = 13f
-            alpha = 0.75f
-            maxLines = 2
-            text = "Preparing book…"
-        }
+        val (tb, titles) = topBar(b.title, { finish() },
+            "☰" to ("Contents" to { showChapters() }),
+            "Aa" to ("Text size and look" to { lookSheet() }),
+            "⋮" to ("More" to { moreSheet() }))
+        topBarView = tb
+        status = titles.second.apply { visibility = View.VISIBLE; text = "Preparing book…" }
         recap = TextView(this).apply {
             setPadding(dp(18), dp(10), dp(18), dp(10))
             textSize = 14f
@@ -217,23 +226,61 @@ class ReaderActivity : Activity(), BookPageView.Host {
         })
         bookView = BookPageView(this).apply { host = this@ReaderActivity }
 
-        controls = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        // the player: book progress, big controls, quick settings
+        controls = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(UiColors.SURFACE)
+            setPadding(dp(12), dp(6), dp(12), dp(10))
+            elevation = dp(6).toFloat()
+        }
+        seekLabel = TextView(this).apply { textSize = 12f; setTextColor(UiColors.MUTED); gravity = android.view.Gravity.CENTER; maxLines = 1 }
+        seek = android.widget.SeekBar(this).apply {
+            max = 1000
+            progressTintList = android.content.res.ColorStateList.valueOf(UiColors.ACCENT)
+            thumbTintList = android.content.res.ColorStateList.valueOf(UiColors.ACCENT)
+            setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(sb: android.widget.SeekBar?, v: Int, fromUser: Boolean) {
+                    if (fromUser && loaded) seekLabel.text = "Go to: " + placeLabel((v.toLong() * (paras.size - 1) / 1000).toInt())
+                }
+                override fun onStartTrackingTouch(sb: android.widget.SeekBar?) { seeking = true }
+                override fun onStopTrackingTouch(sb: android.widget.SeekBar?) {
+                    seeking = false
+                    if (loaded) goTo((progress.toLong() * (paras.size - 1) / 1000).toInt())
+                }
+            })
+        }
+        controls.addView(seekLabel)
+        controls.addView(seek, LinearLayout.LayoutParams(MATCH, WRAP))
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = android.view.Gravity.CENTER }
+        fun spacer() = View(this).also { row.addView(it, LinearLayout.LayoutParams(0, 1, 1f)) }
+        playBtn = iconBtn("▶", "Play / pause", 68, filled = true) { togglePlay() }
+        spacer()
+        row.addView(iconBtn("⏮", "Previous chapter", 48) { stepChapter(-1) })
+        spacer()
         // back 15 s / forward 30 s; long-press back to hear the last sentence again
-        val prev = Button(this).apply { text = "↺15"; setOnClickListener { seekBy(-15) }; setOnLongClickListener { repeatSentence(); true } }
-        playBtn = Button(this).apply { text = "▶ Play"; setOnClickListener { togglePlay() } }
-        val next = Button(this).apply { text = "30↻"; setOnClickListener { seekBy(30) } }
-        speedBtn = Button(this).apply { setOnClickListener { pickSpeed() } }
-        val chapBtn = Button(this).apply { text = "☰"; setOnClickListener { showChapters() } }
-        controls.addView(chapBtn, LinearLayout.LayoutParams(0, WRAP, 0.8f))
-        controls.addView(prev, LinearLayout.LayoutParams(0, WRAP, 0.8f))
-        controls.addView(playBtn, LinearLayout.LayoutParams(0, WRAP, 1.6f))
-        controls.addView(next, LinearLayout.LayoutParams(0, WRAP, 0.8f))
-        controls.addView(speedBtn, LinearLayout.LayoutParams(0, WRAP, 1f))
+        row.addView(iconBtn("↺", "Back 15 seconds (hold: say that again)", 52) { seekBy(-15) }.apply { text = "↺15"; textSize = 16f; setOnLongClickListener { repeatSentence(); true } })
+        spacer(); row.addView(playBtn); spacer()
+        row.addView(iconBtn("↻", "Forward 30 seconds", 52) { seekBy(30) }.apply { text = "30↻"; textSize = 16f })
+        spacer()
+        row.addView(iconBtn("⏭", "Next chapter", 48) { stepChapter(1) })
+        spacer()
+        controls.addView(row, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(2) })
+        val chips = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(8), 0, 0) }
+        speedBtn = chip("1×") { pickSpeed() }
+        layoutChip = chip("📖 Pages") { setLayoutMode(!bookMode) }
+        val cg = { LinearLayout.LayoutParams(WRAP, WRAP).apply { rightMargin = dp(8) } }
+        chips.addView(speedBtn, cg())
+        chips.addView(chip("🗣 Voice") { pickVoice() }, cg())
+        chips.addView(chip("⏾ Sleep") { sleepMenu() }, cg())
+        chips.addView(layoutChip, cg())
+        chips.addView(chip("🔖 Notes") { showNotes() }, cg())
+        chips.addView(chip("🔎 Find") { searchInBook() }, cg())
+        controls.addView(android.widget.HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(chips) })
 
         val content = FrameLayout(this)
         content.addView(list, FrameLayout.LayoutParams(MATCH, MATCH))
         content.addView(bookView, FrameLayout.LayoutParams(MATCH, MATCH))
-        root.addView(status)
+        root.addView(topBarView)
         root.addView(recap)
         root.addView(jumpBar)
         root.addView(content, LinearLayout.LayoutParams(MATCH, 0, 1f))
@@ -310,6 +357,18 @@ class ReaderActivity : Activity(), BookPageView.Host {
 
     override fun dispatchTouchEvent(ev: MotionEvent?): Boolean {
         lastInteraction = System.currentTimeMillis()
+        if (ev != null && ::list.isInitialized) {
+            val onPage = ev.y < (controls.top.takeIf { controls.visibility == View.VISIBLE } ?: Int.MAX_VALUE)
+            if (onPage) scaler.onTouchEvent(ev)
+            if (pinching || ev.pointerCount > 1) {
+                if (!pinchCancelSent) {
+                    val c = MotionEvent.obtain(ev); c.action = MotionEvent.ACTION_CANCEL
+                    super.dispatchTouchEvent(c); c.recycle(); pinchCancelSent = true
+                }
+                if (ev.actionMasked == MotionEvent.ACTION_UP || ev.actionMasked == MotionEvent.ACTION_CANCEL) { pinching = false; pinchCancelSent = false }
+                return true
+            }
+        }
         return super.dispatchTouchEvent(ev)
     }
 
@@ -371,10 +430,32 @@ class ReaderActivity : Activity(), BookPageView.Host {
         val ch = chapterIndex(shown).let { if (it >= 0) chapters[it].title else book.author.ifBlank { "Unknown author" } }
         val sleep = s?.sleepText()?.let { " · $it" } ?: ""
         status.text = "$ch · $pct%$sleep"
+        if (!seeking && paras.isNotEmpty()) {
+            seek.progress = (shown.toLong() * 1000 / maxOf(1, paras.size - 1)).toInt()
+            // about how long is left in this chapter at the current speed
+            val ci = chapterIndex(shown)
+            val end = if (ci + 1 in chapters.indices) chapters[ci + 1].para else paras.size
+            var chars = 0L; for (i in shown until end) chars += paras[i].length
+            val mins = (chars / (15.0 * 60 * Settings.rateFor(this, book.id))).toInt()
+            seekLabel.text = "$pct% of the book · " + (if (mins < 1) "under a minute" else if (mins < 60) "$mins min" else "${mins / 60} h ${mins % 60} min") + " left in this chapter$sleep"
+        }
+    }
+
+    private fun stepChapter(d: Int) {
+        if (!loaded || chapters.isEmpty()) return
+        val cur = chapterIndex(curPara)
+        val target = if (d < 0) {
+            // back: start of this chapter, or the one before if we're already near its start
+            if (cur >= 0 && curPara - chapters[cur].para > 2) cur else cur - 1
+        } else cur + 1
+        if (target < 0) { goTo(0); return }
+        if (target >= chapters.size) { toast("This is the last chapter."); return }
+        goTo(chapters[target].para)
     }
 
     private fun refreshButtons() {
-        playBtn.text = if (isPlaying()) "❚❚ Pause" else "▶ Play"
+        playBtn.text = if (isPlaying()) "❚❚" else "▶"
+        if (::layoutChip.isInitialized) layoutChip.text = if (bookMode) "📖 Pages" else "📜 Scroll"
         speedBtn.text = fmtRate(Settings.rateFor(this, book.id))
     }
 
@@ -483,8 +564,7 @@ class ReaderActivity : Activity(), BookPageView.Host {
     override fun centerTap() {
         val show = controls.visibility != View.VISIBLE
         controls.visibility = if (show) View.VISIBLE else View.GONE
-        status.visibility = if (show) View.VISIBLE else View.GONE
-        actionBar?.let { if (show) it.show() else it.hide() }
+        topBarView.visibility = if (show) View.VISIBLE else View.GONE
     }
 
     override fun footer(page: Int): Pair<String, String> {
@@ -559,7 +639,6 @@ class ReaderActivity : Activity(), BookPageView.Host {
         root.setBackgroundColor(theme.bg)
         list.setBackgroundColor(theme.bg)
         list.cacheColorHint = theme.bg
-        status.setTextColor(theme.fg)
         recap.setTextColor(theme.fg)
         recap.setBackgroundColor(theme.para)
         if (::jumpBar.isInitialized) { jumpBar.setTextColor(theme.fg); jumpBar.setBackgroundColor(theme.para) }
@@ -1297,39 +1376,68 @@ class ReaderActivity : Activity(), BookPageView.Host {
 
     // ---------- menu ----------
 
-    override fun onCreateOptionsMenu(menu: Menu): Boolean {
-        menu.add(0, 1, 0, "Chapters")
-        menu.add(0, 17, 0, "Go to…")
-        menu.add(0, 18, 0, "Places you jumped from")
-        menu.add(0, 11, 0, "Search in book")
-        menu.add(0, 12, 0, "Car mode")
-        menu.add(0, 2, 0, "Bookmarks & notes")
-        menu.add(0, 15, 0, "Export highlights & notes…")
-        menu.add(0, 13, 0, "Collections…")
-        menu.add(0, 14, 0, "Book pages / scrolling")
-        menu.add(0, 16, 0, "Reading stats")
-        menu.add(0, 3, 0, "Sleep timer")
-        menu.add(0, 4, 0, "Voice")
-        menu.add(0, 5, 0, "Appearance")
-        menu.add(0, 6, 0, "Pronunciation fixes")
-        menu.add(0, 7, 0, "Skip page numbers, headers & footnotes").setCheckable(true).isChecked = Settings.skipClutter(this)
-        menu.add(0, 19, 0, "Natural pauses & chapter announcements").setCheckable(true).isChecked = Settings.naturalPauses(this)
-        menu.add(0, 20, 0, "Say numbers properly (Chapter XII → Twelve)").setCheckable(true).isChecked = Settings.speakNumbers(this)
-        menu.add(0, 8, 0, "Export as audio…")
-        menu.add(0, 9, 0, "Back to start")
-        menu.add(0, 10, 0, "Text-to-speech settings")
-        return true
+    /** Everything else, grouped, with clear names. */
+    private fun moreSheet() {
+        sheet(book.title, listOf(
+            SheetRow("🧭", "Go to…", "Slider or percentage, with chapter names") { action(17) },
+            SheetRow("↶", "Places you jumped from", "Undo an accidental jump") { action(18) },
+            SheetRow("🔎", "Search in this book") { action(11) },
+            SheetRow("🔖", "Bookmarks, notes & highlights") { action(2) },
+            null,
+            SheetRow("🗣", "Voice", "Choose the voice for this book") { action(4) },
+            SheetRow("⏾", "Sleep timer", "Stop after a time or at the end of the chapter") { action(3) },
+            SheetRow("⏸", "Natural pauses & chapter announcements", null, Settings.naturalPauses(this)) { action(19) },
+            SheetRow("🔢", "Say numbers properly", "Chapter XII → Twelve, 1850s, \$4.50", Settings.speakNumbers(this)) { action(20) },
+            SheetRow("✂", "Skip page numbers & clutter", null, Settings.skipClutter(this)) { action(7) },
+            SheetRow("🔤", "Pronunciations", "Fix words the voice says wrong") { action(6) },
+            null,
+            SheetRow("🎵", "Save as audio files…", "MP3-style audio of the book or a chapter") { action(8) },
+            SheetRow("📤", "Export highlights & notes…") { action(15) },
+            SheetRow("🗂", "Collections…") { action(13) },
+            SheetRow("🚗", "Car mode", "Huge buttons for driving") { action(12) },
+            SheetRow("📊", "Reading stats") { action(16) },
+            SheetRow("⏮", "Back to the start") { action(9) },
+            SheetRow("⚙", "Android speech settings") { action(10) }
+        ))
     }
 
-    override fun onPrepareOptionsMenu(menu: Menu): Boolean {
-        menu.findItem(7)?.isChecked = Settings.skipClutter(this)
-        menu.findItem(19)?.isChecked = Settings.naturalPauses(this)
-        menu.findItem(20)?.isChecked = Settings.speakNumbers(this)
-        return super.onPrepareOptionsMenu(menu)
+    /** Text size, theme and layout in one place (you can also pinch the text to resize it). */
+    private fun lookSheet() {
+        sheet("Text and look · tip: pinch the page to zoom", listOf(
+            SheetRow("A+", "Bigger text", "Now ${textSize.toInt()}") { changeTextSize(2f); lookSheet() },
+            SheetRow("A−", "Smaller text", "Now ${textSize.toInt()}") { changeTextSize(-2f); lookSheet() },
+            SheetRow("🎨", "Theme: ${theme.name}", "Dark, light, sepia or black") {
+                AlertDialog.Builder(this).setItems(READER_THEMES.map { it.name }.toTypedArray()) { _, w -> Settings.setTheme(this, w); loadAppearance(); applyAppearance() }.show()
+            },
+            SheetRow(if (bookMode) "📜" else "📖", if (bookMode) "Switch to scrolling" else "Switch to book pages", if (bookMode) "One long page" else "Swipe or tap the edges to turn pages") { setLayoutMode(!bookMode) },
+            SheetRow("🔠", "Font, margins, page turn, night mode…") { appearanceMenu() }
+        ))
     }
 
-    override fun onOptionsItemSelected(item: MenuItem): Boolean {
-        when (item.itemId) {
+    private fun changeTextSize(d: Float) {
+        Settings.setTextSize(this, (textSize + d).coerceIn(12f, 40f))
+        loadAppearance(); applyAppearance()
+    }
+
+    // pinch anywhere on the page to make the text bigger or smaller
+    private val scaler by lazy {
+        android.view.ScaleGestureDetector(this, object : android.view.ScaleGestureDetector.SimpleOnScaleGestureListener() {
+            override fun onScaleBegin(d: android.view.ScaleGestureDetector): Boolean { pinching = true; pinchSize = textSize; return true }
+            override fun onScale(d: android.view.ScaleGestureDetector): Boolean {
+                pinchSize = (pinchSize * d.scaleFactor).coerceIn(12f, 40f)
+                status.text = "Text size ${pinchSize.toInt()}"
+                if (!bookMode) { textSize = pinchSize; adapter.notifyDataSetChanged() }
+                return true
+            }
+            override fun onScaleEnd(d: android.view.ScaleGestureDetector) {
+                Settings.setTextSize(this@ReaderActivity, pinchSize)
+                loadAppearance(); applyAppearance(); updateStatus()
+            }
+        })
+    }
+
+    private fun action(id: Int): Boolean {
+        when (id) {
             1 -> showChapters()
             2 -> showNotes()
             3 -> sleepMenu()
@@ -1363,7 +1471,7 @@ class ReaderActivity : Activity(), BookPageView.Host {
                 TtsService.instance?.applySettings(true)
                 toast(if (Settings.speakNumbers(this)) "Numbers and Roman numerals are said as words" else "Numbers are read as written")
             }
-            else -> return super.onOptionsItemSelected(item)
+            else -> return false
         }
         return true
     }

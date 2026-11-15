@@ -20,7 +20,7 @@
         android:label="Shelf Reader"
         android:icon="@drawable/ic_launcher"
         android:roundIcon="@drawable/ic_launcher"
-        android:theme="@android:style/Theme.Material"
+        android:theme="@android:style/Theme.Material.NoActionBar"
         android:allowBackup="true">
 
         <!-- Android Auto: this app offers media (the library, read aloud) -->

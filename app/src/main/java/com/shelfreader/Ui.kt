@@ -218,3 +218,165 @@ fun showStats(act: android.app.Activity) {
         }
         .show()
 }
+
+// =====================================================================
+// A small, consistent look for the whole app (no extra libraries)
+// =====================================================================
+object UiColors {
+    const val BG = 0xFF121212.toInt()
+    const val SURFACE = 0xFF1C1C1E.toInt()
+    const val SURFACE2 = 0xFF2A2A2D.toInt()
+    const val LINE = 0xFF34343A.toInt()
+    const val FG = 0xFFEDEDED.toInt()
+    const val MUTED = 0xFF9A9AA0.toInt()
+    const val ACCENT = 0xFF56B394.toInt()
+    const val ACCENT_DARK = 0xFF2E6E5A.toInt()
+    const val ON_ACCENT = 0xFFFFFFFF.toInt()
+}
+
+/** A rounded background with a touch ripple. */
+fun Context.roundBg(color: Int, radiusDp: Int, stroke: Int? = null): android.graphics.drawable.Drawable {
+    val shape = android.graphics.drawable.GradientDrawable().apply {
+        setColor(color); cornerRadius = dp(radiusDp).toFloat()
+        if (stroke != null) setStroke(dp(1), stroke)
+    }
+    val mask = android.graphics.drawable.GradientDrawable().apply { setColor(-1); cornerRadius = dp(radiusDp).toFloat() }
+    return android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(0x33FFFFFF), shape, mask)
+}
+
+/** A rounded button: filled green for the main action, outlined for the rest. */
+fun Context.pill(label: String, primary: Boolean = false, onClick: () -> Unit): TextView = TextView(this).apply {
+    text = label
+    textSize = 15f
+    gravity = android.view.Gravity.CENTER
+    setTextColor(if (primary) UiColors.ON_ACCENT else UiColors.FG)
+    setTypeface(typeface, Typeface.BOLD)
+    background = roundBg(if (primary) UiColors.ACCENT_DARK else UiColors.SURFACE2, 22, if (primary) null else UiColors.LINE)
+    setPadding(dp(18), dp(11), dp(18), dp(11))
+    minHeight = dp(44)
+    isClickable = true; isFocusable = true
+    setOnClickListener { onClick() }
+}
+
+/** A small rounded chip (for speed, filters and similar). */
+fun Context.chip(label: String, onClick: () -> Unit): TextView = TextView(this).apply {
+    text = label
+    textSize = 14f
+    gravity = android.view.Gravity.CENTER
+    setTextColor(UiColors.FG)
+    background = roundBg(UiColors.SURFACE2, 18, UiColors.LINE)
+    setPadding(dp(14), dp(8), dp(14), dp(8))
+    minHeight = dp(38)
+    isClickable = true; isFocusable = true
+    setOnClickListener { onClick() }
+}
+
+/** A round icon button with a symbol and an accessible description. */
+fun Context.iconBtn(symbol: String, desc: String, sizeDp: Int = 44, filled: Boolean = false, onClick: () -> Unit): TextView = TextView(this).apply {
+    text = symbol
+    contentDescription = desc
+    textSize = if (sizeDp >= 64) 26f else 19f
+    gravity = android.view.Gravity.CENTER
+    setTextColor(if (filled) UiColors.ON_ACCENT else UiColors.FG)
+    background = roundBg(if (filled) UiColors.ACCENT_DARK else 0x00000000, sizeDp / 2)
+    layoutParams = LinearLayout.LayoutParams(dp(sizeDp), dp(sizeDp))
+    isClickable = true; isFocusable = true
+    setOnClickListener { onClick() }
+    setOnLongClickListener { toast(desc); true }
+}
+
+/** The app's own top bar: optional back arrow, title (+ subtitle) and icon actions. */
+fun Context.topBar(title: String, onBack: (() -> Unit)?, vararg actions: Pair<String, Pair<String, () -> Unit>>): Pair<LinearLayout, Pair<TextView, TextView>> {
+    val bar = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = android.view.Gravity.CENTER_VERTICAL
+        setBackgroundColor(UiColors.SURFACE)
+        setPadding(dp(4), dp(6), dp(4), dp(6))
+        elevation = dp(2).toFloat()
+    }
+    if (onBack != null) bar.addView(iconBtn("←", "Back") { onBack() })
+    val titles = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(if (onBack == null) 14 else 6), 0, dp(6), 0) }
+    val t = TextView(this).apply { text = title; textSize = 19f; setTextColor(UiColors.FG); setTypeface(typeface, Typeface.BOLD); maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END }
+    val sub = TextView(this).apply { textSize = 13f; setTextColor(UiColors.MUTED); maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END; visibility = View.GONE }
+    titles.addView(t); titles.addView(sub)
+    bar.addView(titles, LinearLayout.LayoutParams(0, WRAP, 1f))
+    for ((sym, a) in actions) bar.addView(iconBtn(sym, a.first) { a.second() })
+    return bar to (t to sub)
+}
+
+/** One row in an action sheet. */
+data class SheetRow(val icon: String, val label: String, val sub: String? = null, val checked: Boolean? = null, val action: () -> Unit)
+
+/** A bottom sheet with large, clear rows (used instead of long pop-up menus). */
+fun Activity.sheet(title: String?, rows: List<SheetRow?>) {
+    val dlg = android.app.Dialog(this)
+    val col = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        setPadding(0, dp(10), 0, dp(16))
+        background = android.graphics.drawable.GradientDrawable().apply {
+            setColor(UiColors.SURFACE)
+            cornerRadii = floatArrayOf(dp(18).toFloat(), dp(18).toFloat(), dp(18).toFloat(), dp(18).toFloat(), 0f, 0f, 0f, 0f)
+        }
+    }
+    col.addView(View(this).apply { background = roundBg(UiColors.LINE, 3) }, LinearLayout.LayoutParams(dp(40), dp(5)).apply { gravity = android.view.Gravity.CENTER_HORIZONTAL; bottomMargin = dp(8) })
+    if (title != null) col.addView(TextView(this).apply {
+        text = title; textSize = 16f; setTextColor(UiColors.MUTED); setPadding(dp(20), dp(4), dp(20), dp(8)); maxLines = 2
+    })
+    for (r in rows) {
+        if (r == null) { col.addView(View(this).apply { setBackgroundColor(UiColors.LINE) }, LinearLayout.LayoutParams(MATCH, dp(1)).apply { setMargins(dp(16), dp(6), dp(16), dp(6)) }); continue }
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setPadding(dp(20), dp(12), dp(20), dp(12))
+            background = roundBg(0x00000000, 0)
+            minimumHeight = dp(52)
+            isClickable = true
+            setOnClickListener { dlg.dismiss(); r.action() }
+        }
+        row.addView(TextView(this).apply { text = r.icon; textSize = 20f; gravity = android.view.Gravity.CENTER }, LinearLayout.LayoutParams(dp(34), WRAP))
+        val texts = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), 0, 0, 0) }
+        texts.addView(TextView(this).apply { text = r.label; textSize = 16f; setTextColor(UiColors.FG) })
+        if (r.sub != null) texts.addView(TextView(this).apply { text = r.sub; textSize = 13f; setTextColor(UiColors.MUTED) })
+        row.addView(texts, LinearLayout.LayoutParams(0, WRAP, 1f))
+        if (r.checked != null) row.addView(android.widget.Switch(this).apply { isChecked = r.checked; isClickable = false; isFocusable = false })
+        col.addView(row)
+    }
+    val scroll = android.widget.ScrollView(this).apply { addView(col) }
+    dlg.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
+    dlg.setContentView(scroll)
+    dlg.window?.apply {
+        setBackgroundDrawable(android.graphics.drawable.ColorDrawable(0))
+        setGravity(android.view.Gravity.BOTTOM)
+        setLayout(MATCH, WRAP)
+        attributes = attributes.apply { windowAnimations = android.R.style.Animation_InputMethod }
+    }
+    dlg.show()
+}
+
+/** A titled group in the settings screen. */
+fun Context.sectionTitle(label: String): TextView = TextView(this).apply {
+    text = label.uppercase(Locale.getDefault()); textSize = 12f; letterSpacing = 0.08f
+    setTextColor(UiColors.ACCENT); setTypeface(typeface, Typeface.BOLD)
+    setPadding(dp(20), dp(22), dp(20), dp(6))
+}
+
+/** A settings row: icon, label, explanation, optional switch. */
+fun Context.settingRow(icon: String, label: String, sub: String?, switch: Boolean? = null, onClick: (android.widget.Switch?) -> Unit): LinearLayout {
+    val row = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = android.view.Gravity.CENTER_VERTICAL
+        setPadding(dp(20), dp(12), dp(16), dp(12))
+        background = roundBg(0x00000000, 0)
+        minimumHeight = dp(56)
+        isClickable = true
+    }
+    row.addView(TextView(this).apply { text = icon; textSize = 20f; gravity = android.view.Gravity.CENTER }, LinearLayout.LayoutParams(dp(32), WRAP))
+    val texts = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(14), 0, dp(8), 0) }
+    texts.addView(TextView(this).apply { text = label; textSize = 16f; setTextColor(UiColors.FG) })
+    if (sub != null) texts.addView(TextView(this).apply { text = sub; textSize = 13f; setTextColor(UiColors.MUTED) })
+    row.addView(texts, LinearLayout.LayoutParams(0, WRAP, 1f))
+    var sw: android.widget.Switch? = null
+    if (switch != null) { sw = android.widget.Switch(this).apply { isChecked = switch; isClickable = false; isFocusable = false }; row.addView(sw) }
+    row.setOnClickListener { sw?.let { it.isChecked = !it.isChecked }; onClick(sw) }
+    return row
+}
