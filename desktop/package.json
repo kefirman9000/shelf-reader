@@ -36,18 +36,16 @@
     "win": {
       "target": [
         "nsis",
-        "portable"
+        "zip"
       ],
-      "icon": "build/icon.png"
+      "icon": "build/icon.png",
+      "artifactName": "ShelfReader-Windows.${ext}"
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "artifactName": "ShelfReader-Setup.${ext}"
-    },
-    "zip": {
-      "artifactName": "ShelfReader-Windows.${ext}"
     }
   }
 }
