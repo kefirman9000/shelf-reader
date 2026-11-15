@@ -353,6 +353,29 @@ fun Activity.sheet(title: String?, rows: List<SheetRow?>) {
     dlg.show()
 }
 
+/** A friendly one-time tip card with a "Got it" button. Hidden for good once dismissed. */
+fun Context.tipCard(key: String, text: String): View {
+    val card = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = android.view.Gravity.CENTER_VERTICAL
+        background = roundBg(0xFF1F3A31.toInt(), 14, UiColors.ACCENT_DARK)
+        setPadding(dp(14), dp(10), dp(8), dp(10))
+        visibility = if (Settings.seenTip(this@tipCard, key)) View.GONE else View.VISIBLE
+    }
+    card.addView(TextView(this).apply { this.text = "💡"; textSize = 18f }, LinearLayout.LayoutParams(WRAP, WRAP).apply { rightMargin = dp(10) })
+    card.addView(TextView(this).apply {
+        this.text = text; textSize = 14f; setTextColor(UiColors.FG); setLineSpacing(0f, 1.15f)
+    }, LinearLayout.LayoutParams(0, WRAP, 1f))
+    card.addView(TextView(this).apply {
+        this.text = "Got it"; textSize = 14f; setTextColor(UiColors.ACCENT); setTypeface(typeface, Typeface.BOLD)
+        setPadding(dp(12), dp(10), dp(12), dp(10))
+        background = roundBg(0x00000000, 12)
+        isClickable = true; isFocusable = true
+        setOnClickListener { Settings.setSeenTip(this@tipCard, key); card.visibility = View.GONE }
+    })
+    return card
+}
+
 /** A titled group in the settings screen. */
 fun Context.sectionTitle(label: String): TextView = TextView(this).apply {
     text = label.uppercase(Locale.getDefault()); textSize = 12f; letterSpacing = 0.08f

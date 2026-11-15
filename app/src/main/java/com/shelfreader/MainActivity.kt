@@ -89,6 +89,11 @@ class MainActivity : Activity() {
     private lateinit var continueProgress: ProgressBar
     private lateinit var continuePlayBtn: TextView
     private var tab = 0
+    private lateinit var libraryQueryBox: EditText
+    private var libraryQuery = ""
+    private lateinit var searchProgress: ProgressBar
+    private lateinit var suggestBox: View
+    private lateinit var libraryTip: View
 
     private var books: List<Book> = emptyList()
     private val results = ArrayList<SearchResult>()
@@ -180,6 +185,28 @@ class MainActivity : Activity() {
         bar.addView(filterBtn, gap()); bar.addView(viewBtn, gap()); bar.addView(sortBtn, gap())
         lib.addView(android.widget.HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(bar) })
 
+        // find a book in your own library (shown once the library is big enough to need it)
+        libraryQueryBox = EditText(this).apply {
+            setTextColor(UiColors.FG); setHintTextColor(UiColors.MUTED)
+            background = roundBg(UiColors.SURFACE2, 22, UiColors.LINE)
+            setPadding(dp(16), dp(9), dp(16), dp(9))
+            textSize = 15f
+            hint = "🔍  Find a book in your library"
+            isSingleLine = true
+            imeOptions = EditorInfo.IME_ACTION_DONE
+            addTextChangedListener(object : android.text.TextWatcher {
+                override fun afterTextChanged(e: android.text.Editable?) {
+                    val q = e?.toString()?.trim() ?: ""
+                    if (q != libraryQuery) { libraryQuery = q; refreshLibrary() }
+                }
+                override fun beforeTextChanged(a: CharSequence?, b: Int, c: Int, d: Int) {}
+                override fun onTextChanged(a: CharSequence?, b: Int, c: Int, d: Int) {}
+            })
+        }
+        lib.addView(libraryQueryBox, LinearLayout.LayoutParams(MATCH, WRAP).apply { setMargins(dp(12), 0, dp(12), dp(8)) })
+        libraryTip = tipCard("library", "Tap a book to open it. Press and hold a book for more: read aloud, edit, collections, Up next or remove.")
+        lib.addView(libraryTip, LinearLayout.LayoutParams(MATCH, WRAP).apply { setMargins(dp(12), 0, dp(12), dp(8)) })
+
         val holder = FrameLayout(this)
         libraryGrid = GridView(this).apply {
             numColumns = GridView.AUTO_FIT
@@ -238,8 +265,35 @@ class MainActivity : Activity() {
                 "(public-domain and open-access books), Open Library, Wikisource and Feedbooks."
         }
         resultsList = ListView(this)
+        searchProgress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            max = 100
+            isIndeterminate = true
+            progressTintList = android.content.res.ColorStateList.valueOf(UiColors.ACCENT)
+            indeterminateTintList = android.content.res.ColorStateList.valueOf(UiColors.ACCENT)
+            visibility = View.GONE
+        }
+        // ideas to try when the search box is empty
+        val ideas = listOf(
+            listOf("Jane Austen", "Sherlock Holmes", "Mark Twain", "Edgar Allan Poe", "Charles Dickens"),
+            listOf("Agatha Christie", "Jules Verne", "Fairy tales", "Ghost stories", "Shakespeare", "Philosophy")
+        )
+        suggestBox = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), dp(4), dp(12), dp(4))
+            addView(TextView(this@MainActivity).apply {
+                text = "TRY"; textSize = 11f; letterSpacing = 0.08f; setTextColor(UiColors.ACCENT); setPadding(dp(6), 0, 0, dp(6))
+            })
+            for (line in ideas) {
+                val r = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, 0, 0, dp(8)) }
+                for (idea in line) r.addView(chip(idea) { searchBox.setText(idea); searchBox.setSelection(idea.length); doSearch() },
+                    LinearLayout.LayoutParams(WRAP, WRAP).apply { rightMargin = dp(8) })
+                addView(android.widget.HorizontalScrollView(this@MainActivity).apply { isHorizontalScrollBarEnabled = false; addView(r) })
+            }
+        }
         search.addView(row)
+        search.addView(searchProgress, LinearLayout.LayoutParams(MATCH, dp(4)).apply { setMargins(dp(14), dp(10), dp(14), 0) })
         search.addView(searchStatus)
+        search.addView(suggestBox)
         search.addView(resultsList, LinearLayout.LayoutParams(MATCH, 0, 1f))
         searchPane = search
 
@@ -268,7 +322,7 @@ class MainActivity : Activity() {
         setContentView(root)
 
         val open = AdapterView.OnItemClickListener { _, _, pos, _ -> openBook(books[pos]) }
-        val menu = AdapterView.OnItemLongClickListener { _, _, pos, _ -> bookMenu(books[pos]); true }
+        val menu = AdapterView.OnItemLongClickListener { _, _, pos, _ -> Settings.setSeenTip(this, "library"); bookMenu(books[pos]); true }
         libraryList.onItemClickListener = open
         libraryList.onItemLongClickListener = menu
         libraryGrid.onItemClickListener = open
@@ -299,7 +353,9 @@ class MainActivity : Activity() {
 
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
-        if (tab != 0) showTab(0) else super.onBackPressed()
+        if (tab != 0) showTab(0)
+        else if (libraryQuery.isNotEmpty()) libraryQueryBox.setText("")
+        else super.onBackPressed()
     }
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
@@ -466,8 +522,8 @@ class MainActivity : Activity() {
         } catch (e: Throwable) { toast("No file picker available") }
     }
 
-    private val emptyText = "No books yet.\n\nTap “Find books” to search Project Gutenberg, Standard Ebooks, the Internet Archive, " +
-        "Open Library, Wikisource and Feedbooks, or “Import” to open an EPUB, PDF or TXT file from your phone."
+    private val emptyText = "No books yet.\n\nFind thousands of free books to read or listen to, " +
+        "or add an EPUB, PDF or TXT file that's already on your phone."
 
     private fun manageCollections() {
         val custom = Collections.names(this).drop(2)
@@ -490,7 +546,14 @@ class MainActivity : Activity() {
         val all = Library.load(this)
         var filter = Settings.libraryFilter(this)
         if (filter.isNotEmpty() && filter !in Collections.names(this)) { filter = ""; Settings.setLibraryFilter(this, "") }
-        val shown = if (filter.isEmpty()) all else all.filter { filter in Collections.of(this, it.id) }
+        val inCollection = if (filter.isEmpty()) all else all.filter { filter in Collections.of(this, it.id) }
+        val words = libraryQuery.lowercase().split(Regex("\\s+")).filter { it.isNotEmpty() }
+        val shown = if (words.isEmpty()) inCollection else inCollection.filter { b ->
+            val hay = (b.title + " " + b.author).lowercase()
+            words.all { it in hay }
+        }
+        libraryQueryBox.visibility = if (all.size >= 6 || libraryQuery.isNotEmpty()) View.VISIBLE else View.GONE
+        libraryTip.visibility = if (all.isNotEmpty() && !Settings.seenTip(this, "library")) View.VISIBLE else View.GONE
         filterBtn.text = if (filter.isEmpty()) "All books ▾" else "$filter ▾"
         books = when (Settings.librarySort(this)) {
             1 -> shown.sortedBy { sortKey(it.title) }
@@ -502,7 +565,8 @@ class MainActivity : Activity() {
         viewBtn.text = "${VIEW_NAMES[mode]} ▾"
         sortBtn.text = "${SORT_NAMES[Settings.librarySort(this).coerceIn(0, 3)]} ▾"
         emptyBox.visibility = if (books.isEmpty()) View.VISIBLE else View.GONE
-        if (books.isEmpty() && all.isNotEmpty()) libraryEmpty.text = "No books in “$filter” yet.\n\nLong-press a book → Collections… to add it."
+        if (books.isEmpty() && words.isNotEmpty()) libraryEmpty.text = "No books in your library match “$libraryQuery”.\n\nYou can look for it in Find books instead."
+        else if (books.isEmpty() && all.isNotEmpty()) libraryEmpty.text = "No books in “$filter” yet.\n\nPress and hold a book → Collections… to add it."
         else libraryEmpty.text = emptyText
 
         if (mode == 2) {
@@ -637,40 +701,40 @@ class MainActivity : Activity() {
 
     private fun bookMenu(b: Book) {
         val queued = b.id in Settings.queue(this)
-        val items = arrayOf("Open", "Read aloud now", "Edit title & author", "Change cover…", "Reset cover", "Remove from library", "Collections…", "Car mode",
-            if (queued) "Remove from Up next" else "Add to Up next", "About this book…")
-        AlertDialog.Builder(this).setTitle(b.title).setItems(items) { _, w ->
-            when (w) {
-                0 -> openBook(b)
-                1 -> {
-                    startForegroundService(
-                        Intent(this, TtsService::class.java).setAction(TtsService.ACTION_PLAY).putExtra(TtsService.EXTRA_BOOK, b.id)
+        val pct = Library.percent(this, b)
+        sheet(b.title + (if (b.author.isNotBlank()) " · ${b.author}" else "") + " · $pct% read", listOf(
+            SheetRow("📖", "Open") { openBook(b) },
+            SheetRow("▶", "Read aloud now", "Keeps playing with the screen off") {
+                startForegroundService(
+                    Intent(this, TtsService::class.java).setAction(TtsService.ACTION_PLAY).putExtra(TtsService.EXTRA_BOOK, b.id)
+                )
+                toast("Reading “${b.title}” aloud")
+                libraryGrid.postDelayed({ refreshLibrary() }, 800)
+            },
+            SheetRow("⏭", if (queued) "Remove from Up next" else "Add to Up next", if (queued) null else "Plays when the books before it finish") {
+                val q = Settings.queue(this).toMutableList()
+                if (queued) q.remove(b.id) else q += b.id
+                Settings.setQueue(this, q)
+                toast(if (queued) "Removed from Up next" else "Added to Up next")
+            },
+            SheetRow("🚗", "Car mode", "Huge buttons for driving") { startActivity(Intent(this, CarModeActivity::class.java).putExtra("book", b.id)) },
+            null,
+            SheetRow("🗂", "Collections…", "Sort it into shelves like Want to read") { editCollections(this, b.id) { refreshLibrary() } },
+            SheetRow("✏", "Edit title & author") { editBook(b) },
+            SheetRow("🖼", "Change cover…", "Pick a picture from your phone") {
+                pendingCoverBook = b.id
+                try {
+                    @Suppress("DEPRECATION")
+                    startActivityForResult(
+                        Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("image/*"), 44
                     )
-                    toast("Reading “${b.title}” aloud")
-                }
-                2 -> editBook(b)
-                3 -> {
-                    pendingCoverBook = b.id
-                    try {
-                        @Suppress("DEPRECATION")
-                        startActivityForResult(
-                            Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("image/*"), 44
-                        )
-                    } catch (e: Throwable) { toast("No picture picker available") }
-                }
-                4 -> { Covers.reset(this, b); refreshLibrary() }
-                5 -> confirmDelete(b)
-                6 -> editCollections(this, b.id) { refreshLibrary() }
-                7 -> startActivity(Intent(this, CarModeActivity::class.java).putExtra("book", b.id))
-                8 -> {
-                    val q = Settings.queue(this).toMutableList()
-                    if (queued) q.remove(b.id) else q += b.id
-                    Settings.setQueue(this, q)
-                    toast(if (queued) "Removed from Up next" else "Added to Up next. It plays when the books before it finish.")
-                }
-                9 -> aboutBook(b)
-            }
-        }.show()
+                } catch (e: Throwable) { toast("No picture picker available") }
+            },
+            SheetRow("↺", "Reset cover") { Covers.reset(this, b); refreshLibrary() },
+            SheetRow("ℹ", "About this book…", "Description, subjects and similar free books") { aboutBook(b) },
+            null,
+            SheetRow("🗑", "Remove from library") { confirmDelete(b) }
+        ))
     }
 
     // ---------- Up next ----------
@@ -869,7 +933,10 @@ class MainActivity : Activity() {
         val gen = ++searchGen
         results.clear()
         updateResults()
-        searchStatus.text = "Searching…"
+        suggestBox.visibility = View.GONE
+        searchProgress.isIndeterminate = true
+        searchProgress.visibility = View.VISIBLE
+        searchStatus.text = "Searching 6 free libraries…"
         val errors = ArrayList<String>()
         val seen = HashSet<String>()
         var pending = sources.size
@@ -886,9 +953,16 @@ class MainActivity : Activity() {
                 }
                 if (err != null) errors.add(source)
                 updateResults()
-                val head = if (pending > 0) "Searching… " else ""
+                if (pending <= 0 && !busy) searchProgress.visibility = View.GONE
                 val tail = if (errors.isNotEmpty()) " (couldn't reach " + errors.joinToString(", ") + ")" else ""
-                searchStatus.text = "$head${results.size} results$tail. Tap one to download."
+                searchStatus.text = when {
+                    pending > 0 -> "Searching… ${results.size} found so far$tail"
+                    results.isEmpty() && errors.size == sources.size -> "Couldn't reach any library. Check your internet connection and try again."
+                    results.isEmpty() -> "No free books found for “$q”$tail.\n\nTry fewer words, just the author's last name, or check the spelling. " +
+                        "Newer books are usually not free."
+                    else -> "${results.size} book${if (results.size == 1) "" else "s"} found$tail. Tap one to see details and download."
+                }
+                if (pending <= 0 && results.isEmpty()) suggestBox.visibility = View.VISIBLE
             }
         }
 
@@ -971,6 +1045,8 @@ class MainActivity : Activity() {
     private fun download(r: SearchResult, later: Boolean = false) {
         busy = true
         searchStatus.text = "Getting “${r.title}”…"
+        searchProgress.isIndeterminate = true
+        searchProgress.visibility = View.VISIBLE
         pool.execute {
             var dest: File? = null
             try {
@@ -981,7 +1057,8 @@ class MainActivity : Activity() {
                 dest = file
                 Net.download(url, file) { done, total ->
                     runOnUiThread {
-                        searchStatus.text = "Downloading… " +
+                        if (total > 0) { searchProgress.isIndeterminate = false; searchProgress.progress = (done * 100 / total).toInt() }
+                        searchStatus.text = "Downloading “${r.title}”… " +
                             if (total > 0) "${done * 100 / total}%" else "${done / 1024} KB"
                     }
                 }
@@ -1004,8 +1081,10 @@ class MainActivity : Activity() {
                 if (later) Collections.add(this, id, Collections.WANT)
                 runOnUiThread {
                     busy = false
+                    searchProgress.visibility = View.GONE
                     if (later) {
-                        searchStatus.text = "Added “${r.title}” to Want to read."
+                        searchStatus.text = "Added “${r.title}” to your library, in Want to read."
+                        toast("Saved for later")
                     } else {
                         searchStatus.text = "Added “${r.title}” to your library."
                         openBook(book)
@@ -1015,7 +1094,9 @@ class MainActivity : Activity() {
                 dest?.delete()
                 runOnUiThread {
                     busy = false
-                    searchStatus.text = "Couldn't get that book: ${t.message ?: t.javaClass.simpleName}"
+                    searchProgress.visibility = View.GONE
+                    searchStatus.text = "Couldn't get that book: ${t.message ?: t.javaClass.simpleName}. " +
+                        "Try another copy from the list — the same book is often on several sites."
                 }
             }
         }

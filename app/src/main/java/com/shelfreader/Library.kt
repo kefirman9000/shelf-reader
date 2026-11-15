@@ -273,6 +273,9 @@ object Settings {
 
     fun seenVoiceGuide(ctx: Context) = p(ctx).getBoolean("seenVoiceGuide", false)
     fun setSeenVoiceGuide(ctx: Context) = p(ctx).edit().putBoolean("seenVoiceGuide", true).apply()
+    /** One-time tips ("tip_library", "tip_reader"): shown until dismissed. */
+    fun seenTip(ctx: Context, key: String) = p(ctx).getBoolean("tip_$key", false)
+    fun setSeenTip(ctx: Context, key: String, v: Boolean = true) = p(ctx).edit().putBoolean("tip_$key", v).apply()
     fun resumeOnHeadphones(ctx: Context) = p(ctx).getBoolean("resumeOnHeadphones", true)
     fun setResumeOnHeadphones(ctx: Context, v: Boolean) = p(ctx).edit().putBoolean("resumeOnHeadphones", v).apply()
     fun libraryFilter(ctx: Context): String = p(ctx).getString("libraryFilter", "") ?: ""

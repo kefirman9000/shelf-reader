@@ -283,6 +283,8 @@ class ReaderActivity : Activity(), BookPageView.Host {
         root.addView(topBarView)
         root.addView(recap)
         root.addView(jumpBar)
+        root.addView(tipCard("reader", "How it works: tap a paragraph to read aloud from there · double-tap to play or pause · swipe sideways to skip a paragraph · press and hold for bookmarks, notes and copy. In book pages, tap the edges to turn and the middle to hide the controls."),
+            LinearLayout.LayoutParams(MATCH, WRAP).apply { setMargins(dp(10), dp(8), dp(10), dp(4)) })
         root.addView(content, LinearLayout.LayoutParams(MATCH, 0, 1f))
         root.addView(controls)
         setContentView(root)
@@ -991,41 +993,28 @@ class ReaderActivity : Activity(), BookPageView.Host {
 
     private fun paragraphMenu(p: Int) {
         val here = notes.filter { it.para == p }
-        val items = ArrayList<String>()
-        items += "Read aloud from here"
-        items += "Bookmark this paragraph"
-        items += "Add a note…"
-        items += "Copy text"
-        items += "Highlight, define or note a passage…"
-        items += "Bookmark with an audio clip"
-        if (here.isNotEmpty()) items += "Remove bookmark / notes / highlights here"
         val refs = FN_REF.findAll(paras[p]).map { it.groupValues[1] }.distinct().toList()
-        for (r in refs) items += "Show note [$r]"
-        AlertDialog.Builder(this)
-            .setTitle(paras[p].take(80) + if (paras[p].length > 80) "…" else "")
-            .setItems(items.toTypedArray()) { _, w ->
-                when (w) {
-                    0 -> playFrom(p)
-                    1 -> { saveNote(p, ""); toast("Bookmarked") }
-                    2 -> addNote(p)
-                    3 -> {
-                        (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager)
-                            .setPrimaryClip(ClipData.newPlainText("Shelf Reader", paras[p]))
-                        toast("Copied")
-                    }
-                    4 -> selectIn(p)
-                    5 -> saveClip(p)
-                    else -> {
-                        val label = items[w]
-                        if (label.startsWith("Show note [")) showFootnote(label.substringAfter("[").substringBefore("]"), p)
-                        else {
-                            notes.filter { it.para == p && it.type == "clip" }.forEach { java.io.File(filesDir, "clips/${book.id}/${it.file}").delete() }
-                            Library.saveNotes(this, book.id, notes.filter { it.para != p })
-                            reloadNotes()
-                        }
-                    }
-                }
-            }.show()
+        val rows = ArrayList<SheetRow?>()
+        rows += SheetRow("▶", "Read aloud from here") { playFrom(p) }
+        rows += SheetRow("🔖", "Bookmark this paragraph") { saveNote(p, ""); toast("Bookmarked") }
+        rows += SheetRow("📝", "Add a note…") { addNote(p) }
+        rows += SheetRow("🖍", "Highlight, define or note a passage…", "Select the exact words") { selectIn(p) }
+        rows += SheetRow("🎙", "Bookmark with an audio clip", "Saves this sentence spoken aloud, to play or share") { saveClip(p) }
+        rows += SheetRow("📋", "Copy text") {
+            (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager)
+                .setPrimaryClip(ClipData.newPlainText("Shelf Reader", paras[p]))
+            toast("Copied")
+        }
+        for (r in refs) rows += SheetRow("†", "Show note [$r]") { showFootnote(r, p) }
+        if (here.isNotEmpty()) {
+            rows += null
+            rows += SheetRow("🗑", "Remove bookmark / notes / highlights here") {
+                notes.filter { it.para == p && it.type == "clip" }.forEach { java.io.File(filesDir, "clips/${book.id}/${it.file}").delete() }
+                Library.saveNotes(this, book.id, notes.filter { it.para != p })
+                reloadNotes()
+            }
+        }
+        sheet(paras[p].take(80) + if (paras[p].length > 80) "…" else "", rows)
     }
 
     private fun saveNote(p: Int, text: String) {
@@ -1397,7 +1386,19 @@ class ReaderActivity : Activity(), BookPageView.Host {
             SheetRow("🚗", "Car mode", "Huge buttons for driving") { action(12) },
             SheetRow("📊", "Reading stats") { action(16) },
             SheetRow("⏮", "Back to the start") { action(9) },
-            SheetRow("⚙", "Android speech settings") { action(10) }
+            SheetRow("⚙", "Android speech settings") { action(10) },
+            SheetRow("💡", "How to use the reader", "Taps, swipes and shortcuts") {
+                AlertDialog.Builder(this).setTitle("How to use the reader").setMessage(
+                    "• Tap a paragraph to read aloud from there.\n" +
+                    "• Double-tap to play or pause.\n" +
+                    "• Swipe sideways to skip a paragraph.\n" +
+                    "• Press and hold a paragraph to bookmark, add a note, highlight or copy.\n" +
+                    "• Pinch to make the text bigger or smaller.\n" +
+                    "• Hold ↺15 to hear the last sentence again.\n" +
+                    "• In book pages, tap the edges to turn and the middle to hide the controls.\n\n" +
+                    "It keeps reading with the screen off. The controls are also in your notifications and on the lock screen."
+                ).setPositiveButton("OK", null).show()
+            }
         ))
     }
 
