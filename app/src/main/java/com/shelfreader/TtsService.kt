@@ -26,6 +26,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
 import android.os.SystemClock
+import android.view.KeyEvent
 import android.service.media.MediaBrowserService
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
@@ -64,6 +65,9 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
     var paras: List<String> = emptyList(); private set
     var chapters: List<Chapter> = emptyList(); private set
     private var segs: List<Seg> = emptyList()
+    private var headers: Set<String> = emptySet()
+    private var mergedSubs: Set<Int> = emptySet()
+    private var metaChapter = -2
     private var segIndex = 0
     var playing = false; private set
 
@@ -76,6 +80,7 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
     private var speaker: Speaker? = null
     private var gen = 0
     private var queuedUpTo = -1
+    private var segStartedAt = 0L
     private var lastSpoken = -1
     private var foreground = false
     private var lastNotifKey = ""
@@ -140,6 +145,16 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
         }
     }
 
+    private var headsetTaps = 0
+    private val headsetRun = Runnable {
+        val n = headsetTaps; headsetTaps = 0
+        when {
+            n >= 3 -> seekSeconds(-15)
+            n == 2 -> skipChapter(1)
+            else -> if (playing) pause() else play()
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
         instance = this
@@ -151,9 +166,26 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
             setCallback(object : MediaSession.Callback() {
                 override fun onPlay() = play()
                 override fun onPause() = pause()
-                override fun onSkipToNext() = skip(1)
-                override fun onSkipToPrevious() = skip(-1)
+                // next / previous track = chapters; fast-forward / rewind = 30 / 15 seconds
+                override fun onSkipToNext() = skipChapter(1)
+                override fun onSkipToPrevious() = skipChapter(-1)
+                override fun onFastForward() = seekSeconds(30)
+                override fun onRewind() = seekSeconds(-15)
                 override fun onStop() = stopAll()
+                override fun onCustomAction(action: String, extras: Bundle?) {
+                    when (action) { "back15" -> seekSeconds(-15); "fwd30" -> seekSeconds(30); "repeat" -> repeatSentence() }
+                }
+                // headset button: 1 press = play/pause, 2 = next chapter, 3 = back 15 seconds
+                override fun onMediaButtonEvent(mediaButtonIntent: Intent): Boolean {
+                    @Suppress("DEPRECATION")
+                    val ev = mediaButtonIntent.getParcelableExtra<KeyEvent>(Intent.EXTRA_KEY_EVENT) ?: return super.onMediaButtonEvent(mediaButtonIntent)
+                    if (ev.keyCode != KeyEvent.KEYCODE_HEADSETHOOK && ev.keyCode != KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE) return super.onMediaButtonEvent(mediaButtonIntent)
+                    if (ev.action != KeyEvent.ACTION_DOWN || ev.repeatCount > 0) return true
+                    headsetTaps++
+                    main.removeCallbacks(headsetRun)
+                    main.postDelayed(headsetRun, 450)
+                    return true
+                }
                 override fun onPlayFromMediaId(mediaId: String?, extras: Bundle?) {
                     if (mediaId == null) return
                     if (mediaId != bookId && !load(mediaId)) return
@@ -253,6 +285,9 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
         paras = d.paras
         chapters = d.chapters
         segs = Speech.segments(paras)
+        headers = SpeechText.headerLines(paras, b.title, b.author)
+        mergedSubs = SpeechText.mergedSubtitles(paras, chapters)
+        metaChapter = -2
         bookId = id
         title = b.title
         author = b.author
@@ -260,13 +295,45 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
         segIndex = segFor(Library.position(this, id), Library.offset(this, id))
         lastNotifKey = ""
         applySettings(false)
-        session.setMetadata(
-            MediaMetadata.Builder()
-                .putString(MediaMetadata.METADATA_KEY_TITLE, title)
-                .putString(MediaMetadata.METADATA_KEY_ARTIST, author)
-                .build()
-        )
+        updateMetadata()
         return true
+    }
+
+    /** Lock screen, car and headset show the chapter, with the book underneath, and the cover. */
+    private fun updateMetadata() {
+        val ci = chapterIndexOf(index)
+        if (ci == metaChapter) return
+        metaChapter = ci
+        val ch = if (ci >= 0) chapters[ci].title else null
+        val b = bookId?.let { Library.get(this, it) }
+        val m = MediaMetadata.Builder()
+            .putString(MediaMetadata.METADATA_KEY_TITLE, ch ?: title)
+            .putString(MediaMetadata.METADATA_KEY_ARTIST, if (ch != null) title else author)
+            .putString(MediaMetadata.METADATA_KEY_ALBUM, author.ifBlank { title })
+            .putString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE, ch ?: title)
+            .putString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE, if (ch != null) "$title · ${author}".trimEnd(' ', '·') else author)
+        val art = try { b?.let { Covers.get(this, it) { metaChapter = -2; main.post { updateMetadata() } } } } catch (t: Throwable) { null }
+        if (art != null) m.putBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART, art)
+        session.setMetadata(m.build())
+    }
+
+    /** Again: the sentence being read (or the one before, if it only just started). */
+    fun repeatSentence() {
+        if (segs.isEmpty()) return
+        val justStarted = playing && SystemClock.elapsedRealtime() - segStartedAt < 1500
+        segIndex = (if (playing && !justStarted) segIndex else segIndex - 1).coerceIn(0, segs.size - 1)
+        savePos()
+        if (playing && ready) speakFrom(segIndex)
+        update()
+    }
+
+    /** Jumps to a paragraph (used by search, the Go to dialog and Up next). */
+    fun jumpTo(para: Int) {
+        if (segs.isEmpty()) return
+        segIndex = segFor(para.coerceIn(0, paras.size - 1))
+        savePos()
+        if (playing && ready) speakFrom(segIndex)
+        update()
     }
 
     /** First sentence of [para] that contains or follows character [off]. */
@@ -361,6 +428,8 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
         update()
     }
 
+    fun currentSegText(): String? = segs.getOrNull(segIndex)?.let { paras[it.para].substring(it.start, it.end) }
+
     fun chapterTitle(): String? = chapterIndexOf(index).let { if (it >= 0) chapters[it].title else null }
     fun bookTitle(): String = title
 
@@ -411,32 +480,77 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
         val sp = speaker ?: Speaker(this).also { speaker = it }
         var mode = if (first) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
         var spoke = false
+        val natural = Settings.naturalPauses(this)
+        val rate = Settings.rateFor(this, bookId)
         while (queuedUpTo < segs.size - 1 && (queuedUpTo < segIndex + 4 || (first && !spoke))) {
             val k = ++queuedUpTo
-            val text = sp.spoken(segText(k)) ?: continue
-            t.speak(text, mode, null, "$gen:$k")
-            mode = TextToSpeech.QUEUE_ADD
+            val items = itemsFor(k, sp, natural) ?: continue
+            if (natural) t.setSpeechRate(rate * SpeechText.paceFor(segs[k].para))
+            for ((j, it) in items.withIndex()) {
+                val last = j == items.size - 1
+                t.speak(it.text, mode, null, if (last) "$gen:$k:e" else "$gen:$k:$j")
+                mode = TextToSpeech.QUEUE_ADD
+                val gap = if (natural) gapAfter(k, it.gapMs, last) else 0
+                if (gap > 30) t.playSilentUtterance(gap.toLong(), TextToSpeech.QUEUE_ADD, "$gen:$k:p$j")
+            }
             spoke = true
             lastSpoken = k
         }
+        if (natural) t.setSpeechRate(rate)
         if (first && !spoke) finished()
+    }
+
+    /** What to say for sentence [k]: chapter headings announced like an audiobook, clause pieces with pauses. */
+    private fun itemsFor(k: Int, sp: Speaker, natural: Boolean): List<SpeechText.Piece>? {
+        val s = segs[k]
+        val p = paras[s.para]
+        if (Settings.skipClutter(this) && (s.para in mergedSubs || SpeechText.isHeader(headers, p) || SpeechText.isPageNumber(p))) return null
+        val ci = chapterIndexOf(s.para)
+        if (natural && ci >= 0 && chapters[ci].para == s.para && SpeechText.isHeadingOf(p, chapters[ci].title)) {
+            return if (s.start == 0) SpeechText.chapterOpening(chapters[ci].title) else null
+        }
+        val text = sp.spoken(segText(k)) ?: return null
+        return if (natural) SpeechText.pieces(text) else listOf(SpeechText.Piece(text, 0))
+    }
+
+    /** Pause after a piece: by punctuation, plus more at paragraph and chapter ends; shorter at higher speeds. */
+    private fun gapAfter(k: Int, base: Int, endOfSentence: Boolean): Int {
+        var g = base
+        if (endOfSentence) {
+            val nx = segs.getOrNull(k + 1)
+            if (nx != null && nx.para != segs[k].para) g += 260
+            if (nx != null && chapterIndexOf(nx.para) != chapterIndexOf(segs[k].para)) g += 900
+        }
+        val rate = Settings.rateFor(this, bookId).coerceAtLeast(0.5f)
+        return SpeechText.vary(((g / rate) - 150).toInt())
     }
 
     private fun finished() {
         val id = bookId
+        var done = false
         if (id != null && segs.isNotEmpty() && segIndex >= segs.size - 3) {
             Collections.add(this, id, Collections.FINISHED)
             Collections.set(this, id, Collections.of(this, id) - Collections.WANT)
             Library.get(this, id)?.let { Stats.finished(this, it) }
+            done = true
         }
         playing = false
         releaseWake()
         update()
+        // Up next: start the next book in the queue
+        val q = Settings.queue(this).filter { it != id && Library.get(this, it) != null }
+        if (done && q.isNotEmpty()) {
+            val next = q.first()
+            Settings.setQueue(this, q.drop(1))
+            val name = Library.get(this, next)?.title ?: ""
+            toast("Finished. Up next: $name")
+            main.postDelayed({ if (!playing && load(next)) play() }, 4000)
+        }
     }
 
     private fun parse(id: String?): Pair<Int, Int>? {
         val parts = id?.split(":") ?: return null
-        if (parts.size != 2) return null
+        if (parts.size < 2) return null
         val g = parts[0].toIntOrNull() ?: return null
         val k = parts[1].toIntOrNull() ?: return null
         return g to k
@@ -447,10 +561,12 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
             main.post {
                 val (g, k) = parse(utteranceId) ?: return@post
                 if (g != gen) return@post
+                if (segIndex != k || utteranceId?.endsWith(":0") == true) segStartedAt = SystemClock.elapsedRealtime()
                 segIndex = k
                 savePos()
                 fill(false)
                 update()
+                updateMetadata()
             }
         }
 
@@ -458,6 +574,7 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
             main.post {
                 val (g, k) = parse(utteranceId) ?: return@post
                 if (g != gen) return@post
+                if (utteranceId?.endsWith(":e") != true) return@post   // only act when a whole sentence is done
                 val next = k + 1
                 if (sleepAtChapterEnd && next < segs.size &&
                     chapterIndexOf(segs[next].para) != chapterIndexOf(segs[k].para)
@@ -571,10 +688,13 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
     private fun update() {
         val actions = PlaybackState.ACTION_PLAY or PlaybackState.ACTION_PAUSE or PlaybackState.ACTION_PLAY_PAUSE or
             PlaybackState.ACTION_SKIP_TO_NEXT or PlaybackState.ACTION_SKIP_TO_PREVIOUS or PlaybackState.ACTION_STOP or
-            PlaybackState.ACTION_PLAY_FROM_MEDIA_ID
+            PlaybackState.ACTION_PLAY_FROM_MEDIA_ID or PlaybackState.ACTION_FAST_FORWARD or PlaybackState.ACTION_REWIND
         session.setPlaybackState(
             PlaybackState.Builder()
                 .setActions(actions)
+                // buttons for Android Auto and some lock screens
+                .addCustomAction(PlaybackState.CustomAction.Builder("back15", "Back 15 seconds", android.R.drawable.ic_media_rew).build())
+                .addCustomAction(PlaybackState.CustomAction.Builder("fwd30", "Forward 30 seconds", android.R.drawable.ic_media_ff).build())
                 .setState(if (playing) PlaybackState.STATE_PLAYING else PlaybackState.STATE_PAUSED, index.toLong(), 1f)
                 .build()
         )

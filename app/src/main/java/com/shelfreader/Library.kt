@@ -14,7 +14,7 @@ data class Book(
     val added: Long
 )
 
-data class Chapter(val title: String, val para: Int)
+data class Chapter(val title: String, val para: Int, val level: Int = 0)
 data class Picture(val para: Int, val src: String)
 data class Doc(val paras: List<String>, val chapters: List<Chapter>, val pictures: List<Picture> = emptyList())
 /** A bookmark (no text), a note, or a highlight (type "hl", with a character range and colour). */
@@ -26,7 +26,9 @@ data class Note(
     val start: Int = 0,
     val end: Int = 0,
     val color: String = "yellow",
-    val quote: String = ""
+    val quote: String = "",
+    /** For "clip" notes: the audio file name in files/clips/<book id>/ */
+    val file: String = ""
 )
 
 object Library {
@@ -115,7 +117,7 @@ object Library {
                     val t = l.indexOf('\t')
                     if (t <= 0) null else l.substring(0, t).toIntOrNull()?.let { Chapter(l.substring(t + 1), it) }
                 }
-                return Doc(paras, chaps, pictures(ctx, b, paras.size))
+                return Doc(paras, SpeechText.improveChapters(paras, chaps), pictures(ctx, b, paras.size))
             }
         }
         val d = Extract.document(File(dir(ctx), b.file), b.format)
@@ -123,7 +125,7 @@ object Library {
         cf.writeText(d.chapters.joinToString("\n") { "${it.para}\t${it.title.replace('\n', ' ').replace('\t', ' ')}" })
         File(dir(ctx), "${b.id}.v2.imgs").writeText(d.pictures.joinToString("\n") { "${it.para}\t${it.src}" })
         prefs(ctx).edit().putInt("len_${b.id}", d.paras.size).apply()
-        return d
+        return d.copy(chapters = SpeechText.improveChapters(d.paras, d.chapters))
     }
 
     /** Pictures for a cached book; books added before pictures were supported get them found once. */
@@ -192,7 +194,7 @@ object Library {
             (0 until arr.length()).map {
                 val o = arr.getJSONObject(it)
                 Note(o.getInt("p"), o.optString("t"), o.optLong("time"), o.optString("type", "note"),
-                    o.optInt("s"), o.optInt("e"), o.optString("c", "yellow"), o.optString("q"))
+                    o.optInt("s"), o.optInt("e"), o.optString("c", "yellow"), o.optString("q"), o.optString("f"))
             }.sortedWith(compareBy({ it.para }, { it.start })).toMutableList()
         } catch (t: Throwable) {
             mutableListOf()
@@ -204,7 +206,8 @@ object Library {
         val arr = JSONArray()
         for (n in list) arr.put(JSONObject().apply {
             put("p", n.para); put("t", n.text); put("time", n.time); put("type", n.type)
-            if (n.type == "hl") { put("s", n.start); put("e", n.end); put("c", n.color); put("q", n.quote) }
+            if (n.type == "hl" || n.type == "clip") { put("s", n.start); put("e", n.end); put("c", n.color); put("q", n.quote) }
+            if (n.file.isNotEmpty()) put("f", n.file)
         })
         notesFile(ctx, id).writeText(arr.toString())
         if (touch) touch(ctx, id)
@@ -288,6 +291,13 @@ object Settings {
     fun setMargin(ctx: Context, v: Int) = p(ctx).edit().putInt("margin", v).apply()
 
     fun skipClutter(ctx: Context) = p(ctx).getBoolean("skipClutter", true)
+    fun naturalPauses(ctx: Context) = p(ctx).getBoolean("naturalPauses", true)
+    fun setNaturalPauses(ctx: Context, v: Boolean) = p(ctx).edit().putBoolean("naturalPauses", v).apply()
+    fun speakNumbers(ctx: Context) = p(ctx).getBoolean("speakNumbers", true)
+    fun setSpeakNumbers(ctx: Context, v: Boolean) = p(ctx).edit().putBoolean("speakNumbers", v).apply()
+    /** Books that play one after another ("Up next"). */
+    fun queue(ctx: Context): List<String> = (p(ctx).getString("queue", "") ?: "").split(',').filter { it.isNotBlank() }
+    fun setQueue(ctx: Context, ids: List<String>) = p(ctx).edit().putString("queue", ids.joinToString(",")).apply()
     fun setSkipClutter(ctx: Context, v: Boolean) = p(ctx).edit().putBoolean("skipClutter", v).apply()
 
     fun libraryView(ctx: Context) = p(ctx).getInt("libraryView", 0)

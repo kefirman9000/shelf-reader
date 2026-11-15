@@ -45,14 +45,14 @@ function syncNow(store, folder) {
     if (R) used.add(R);
     if (R && (R.updated || 0) > (L.updated || 0)) {
       store.setState(b.id, {
-        pos: R.pos || 0, off: R.off || 0, notes: R.notes || [], collections: R.collections || [], updated: R.updated
+        pos: R.pos || 0, off: R.off || 0, notes: [...(R.notes || []).filter((n) => n.type !== 'clip'), ...(L.notes || []).filter((n) => n.type === 'clip')], collections: R.collections || [], updated: R.updated
       });
       pulled++;
     }
     const S = store.state(b.id);
     out.push({
       id: b.id, title: b.title, author: b.author, pos: S.pos || 0, off: S.off || 0, len: S.len || 0,
-      updated: S.updated || 0, notes: S.notes || [], collections: S.collections || []
+      updated: S.updated || 0, notes: (S.notes || []).filter((n) => n.type !== 'clip'), collections: S.collections || []
     });
   }
   // keep books that only the other device has

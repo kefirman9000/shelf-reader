@@ -48,7 +48,9 @@ object SyncFile {
             if (r != null && r.optLong("updated") > Library.updated(ctx, b.id)) {
                 Library.applySynced(ctx, b.id, r.optInt("pos"), r.optInt("off"), r.optLong("updated"))
                 val notes = r.optJSONArray("notes") ?: JSONArray()
-                Library.saveNotes(ctx, b.id, (0 until notes.length()).map { noteFromJson(notes.getJSONObject(it)) }, touch = false)
+                // audio clips stay on the device that made them
+                val clips = Library.notes(ctx, b.id).filter { it.type == "clip" }
+                Library.saveNotes(ctx, b.id, (0 until notes.length()).map { noteFromJson(notes.getJSONObject(it)) }.filter { it.type != "clip" } + clips, touch = false)
                 val cols = r.optJSONArray("collections") ?: JSONArray()
                 Collections.set(ctx, b.id, (0 until cols.length()).map { cols.getString(it) }.toSet(), touch = false)
                 Library.applySynced(ctx, b.id, r.optInt("pos"), r.optInt("off"), r.optLong("updated"))
@@ -58,7 +60,7 @@ object SyncFile {
                 put("id", b.id); put("title", b.title); put("author", b.author)
                 put("pos", Library.position(ctx, b.id)); put("off", Library.offset(ctx, b.id))
                 put("len", Library.length(ctx, b.id)); put("updated", Library.updated(ctx, b.id))
-                put("notes", JSONArray().apply { Library.notes(ctx, b.id).forEach { put(noteToJson(it)) } })
+                put("notes", JSONArray().apply { Library.notes(ctx, b.id).filter { it.type != "clip" }.forEach { put(noteToJson(it)) } })
                 put("collections", JSONArray(Collections.of(ctx, b.id).toList()))
             })
         }

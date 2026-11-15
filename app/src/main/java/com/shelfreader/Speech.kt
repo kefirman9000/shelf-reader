@@ -73,12 +73,13 @@ object Speech {
 /** Turns book text into what the voice should actually say. */
 class Speaker(ctx: Context) {
     private val skipClutter = Settings.skipClutter(ctx)
+    private val speakNumbers = Settings.speakNumbers(ctx)
     private val rules: List<Pair<Regex, String>> = Settings.fixes(ctx).filter { it.from.isNotBlank() }.map {
         Regex("(?<![\\p{L}\\p{N}])" + Regex.escape(it.from) + "(?![\\p{L}\\p{N}])", RegexOption.IGNORE_CASE) to it.to
     }
 
     companion object {
-        private val footnoteRef = Regex("\\[(\\d{1,3}|[a-zA-Z*†‡])\\]|\\{\\d{1,3}\\}|(?<=[.,;:”\"])\\d{1,3}(?=\\s|$)")
+        private val footnoteRef = Regex("\\[(\\d{1,3}|[a-zA-Z*†‡])\\]|\\{\\d{1,3}\\}|(?<=\\p{L}[.,;:”\"])\\d{1,3}(?=\\s|$)")
         private val url = Regex("https?://\\S+|www\\.\\S+")
         private val illustration = Regex("\\[(Illustration|Image|Picture|Sidenote)[^\\]]*\\]", RegexOption.IGNORE_CASE)
         private val pageMark = Regex("(?i)^\\[?(page|pg\\.?|p\\.)\\s*\\d+\\]?$")
@@ -105,6 +106,7 @@ class Speaker(ctx: Context) {
             if (core.isEmpty() || core.all { it.isDigit() }) return null
         }
         for ((re, to) in rules) t = re.replace(t, Regex.escapeReplacement(to))
+        if (speakNumbers) t = SpeechText.normalize(t)
         return t.trim().ifEmpty { null }
     }
 }
