@@ -3,6 +3,11 @@ name: Build APK
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - 'tools/**'
+      - '**.md'
+      - '.github/workflows/screenshots.yml'
   pull_request:
   workflow_dispatch:
 
