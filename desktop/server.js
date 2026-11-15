@@ -9,6 +9,7 @@ const { Store } = require('./lib/store');
 const { SOURCES, resolveArchive, getBuffer, getJson, define } = require('./lib/sources');
 const { epubInfo } = require('./lib/extract');
 const cloud = require('./lib/cloud');
+const sync = require('./lib/sync');
 
 const UI_DIR = path.join(__dirname, 'ui');
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.txt': 'text/plain; charset=utf-8', '.css': 'text/css; charset=utf-8', '.png': 'image/png', '.svg': 'image/svg+xml' };
@@ -72,6 +73,22 @@ function startServer(opts = {}) {
   }
 
   const job = { running: false };
+
+  // ---------- phone ↔ PC sync: on start, every few minutes, and shortly after changes ----------
+  const syncState = { last: 0, error: null, timer: null };
+  const runSync = () => {
+    const folder = store.settings().syncFolder;
+    if (!folder) return null;
+    try { const r = sync.syncNow(store, folder); syncState.last = Date.now(); syncState.error = null; return r; }
+    catch (e) { syncState.error = e.message; throw e; }
+  };
+  store.onChange = () => {
+    if (!store.settings().syncFolder) return;
+    clearTimeout(syncState.timer);
+    syncState.timer = setTimeout(() => { try { runSync(); } catch (_) {} }, 15000);
+  };
+  setTimeout(() => { try { runSync(); } catch (_) {} }, 1500);
+  setInterval(() => { try { runSync(); } catch (_) {} }, 3 * 60 * 1000);
 
   async function api(req, res, url) {
     const p = url.pathname;
@@ -181,15 +198,30 @@ function startServer(opts = {}) {
       }
       try {
         const d = await store.doc(b);
+        const before = store.state(b.id);
         store.setState(b.id, { opened: Date.now() });
         store.setSettings({ lastBook: b.id });
-        return send(res, 200, { book: bookView(b), ...d, state: store.state(b.id) });
+        return send(res, 200, { book: bookView(b), ...d, state: { ...store.state(b.id) }, prevOpened: before.opened || 0 });
       } catch (e) { return send(res, 500, { error: e.message }); }
     }
 
+    if ((mm = m(/^\/api\/state\/([\w-]+)$/)) && req.method === 'GET') {
+      if (!store.get(mm[1])) return send(res, 404, { error: 'not found' });
+      return send(res, 200, store.state(mm[1]));
+    }
     if ((mm = m(/^\/api\/state\/([\w-]+)$/)) && req.method === 'PUT') {
       if (!store.get(mm[1])) return send(res, 404, { error: 'not found' });
       return send(res, 200, store.setState(mm[1], await json(req)));
+    }
+
+    if ((mm = m(/^\/api\/picture\/([\w-]+)$/))) {
+      const b = store.get(mm[1]);
+      const data = b && store.picture(b, url.searchParams.get('src') || '');
+      if (!data) return send(res, 404, 'no picture', 'text/plain');
+      const ext = (url.searchParams.get('src') || '').split('.').pop().toLowerCase();
+      const type = { png: 'image/png', gif: 'image/gif', svg: 'image/svg+xml', webp: 'image/webp' }[ext] || 'image/jpeg';
+      res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'max-age=86400', ...ISOLATE });
+      return res.end(data);
     }
 
     if ((mm = m(/^\/api\/cover\/([\w-]+)$/))) {
@@ -213,6 +245,44 @@ function startServer(opts = {}) {
       try { return send(res, 200, await define(url.searchParams.get('w') || '')); }
       catch (e) { return send(res, 502, { error: e.message }); }
     }
+
+    // ---------- reading stats ----------
+    if (p === '/api/stats' && req.method === 'GET') return send(res, 200, store.stats());
+    if (p === '/api/stats/add' && req.method === 'POST') {
+      const r = await json(req); const st = store.stats();
+      const day = /^\d{4}-\d{2}-\d{2}$/.test(r.day || '') ? r.day : new Date().toISOString().slice(0, 10);
+      const cur = (st.days || (st.days = {}))[day] || {};
+      st.days[day] = { read: (cur.read || 0) + Math.min(60, +r.read || 0), listen: (cur.listen || 0) + Math.min(60, +r.listen || 0) };
+      return send(res, 200, store.setStats(st));
+    }
+    if (p === '/api/stats/finished' && req.method === 'POST') {
+      const r = await json(req); const st = store.stats();
+      st.finished = st.finished || [];
+      const date = new Date().toISOString();
+      if (!st.finished.some((f) => f.id === r.id && String(f.date).slice(0, 10) === date.slice(0, 10))) st.finished.push({ id: r.id, title: r.title, author: r.author || '', date });
+      store.setStats(st); store.onChange && store.onChange();
+      return send(res, 200, st);
+    }
+    if (p === '/api/stats/goal' && req.method === 'PUT') {
+      const r = await json(req); const st = store.stats();
+      st.goal = Math.max(5, Math.min(600, +r.goal || 30)); st.goalUpdated = Date.now();
+      store.setStats(st); store.onChange && store.onChange();
+      return send(res, 200, st);
+    }
+
+    // ---------- sync ----------
+    if (p === '/api/sync' && req.method === 'GET') return send(res, 200, { folder: store.settings().syncFolder || null, last: syncState.last, error: syncState.error });
+    if (p === '/api/sync/setup' && req.method === 'POST') {
+      if (!opts.pickFolder) return send(res, 400, { error: 'Sync setup works in the Windows app.' });
+      const folder = await opts.pickFolder('Choose a folder inside Google Drive or OneDrive for syncing');
+      if (!folder) return send(res, 200, { cancelled: true });
+      store.setSettings({ syncFolder: folder });
+      try { const r = runSync(); return send(res, 200, { folder, ...r }); } catch (e) { return send(res, 500, { error: e.message }); }
+    }
+    if (p === '/api/sync/now' && req.method === 'POST') {
+      try { return send(res, 200, runSync() || { error: 'Sync isn’t set up' }); } catch (e) { return send(res, 500, { error: e.message }); }
+    }
+    if (p === '/api/sync/off' && req.method === 'POST') { store.setSettings({ syncFolder: null }); return send(res, 200, { ok: true }); }
 
     if (p === '/api/backup') {
       res.writeHead(200, { ...ISOLATE, 'Content-Type': 'application/zip', 'Content-Disposition': `attachment; filename="ShelfReader-desktop-backup-${new Date().toISOString().slice(0, 10)}.zip"` });

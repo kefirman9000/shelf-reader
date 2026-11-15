@@ -15,7 +15,8 @@ data class Book(
 )
 
 data class Chapter(val title: String, val para: Int)
-data class Doc(val paras: List<String>, val chapters: List<Chapter>)
+data class Picture(val para: Int, val src: String)
+data class Doc(val paras: List<String>, val chapters: List<Chapter>, val pictures: List<Picture> = emptyList())
 data class Note(val para: Int, val text: String, val time: Long)
 
 object Library {
@@ -75,7 +76,7 @@ object Library {
     fun remove(ctx: Context, b: Book) {
         save(ctx, load(ctx).filter { it.id != b.id })
         val d = dir(ctx)
-        for (name in listOf(b.file, "${b.id}.paras", "${b.id}.v2.paras", "${b.id}.v2.chap", "${b.id}.notes.json", "${b.id}.cover.jpg")) {
+        for (name in listOf(b.file, "${b.id}.paras", "${b.id}.v2.paras", "${b.id}.v2.chap", "${b.id}.v2.imgs", "${b.id}.notes.json", "${b.id}.cover.jpg")) {
             File(d, name).delete()
         }
         Collections.forget(ctx, b.id)
@@ -104,14 +105,45 @@ object Library {
                     val t = l.indexOf('\t')
                     if (t <= 0) null else l.substring(0, t).toIntOrNull()?.let { Chapter(l.substring(t + 1), it) }
                 }
-                return Doc(paras, chaps)
+                return Doc(paras, chaps, pictures(ctx, b, paras.size))
             }
         }
         val d = Extract.document(File(dir(ctx), b.file), b.format)
         pf.writeText(d.paras.joinToString("\n") { it.replace('\n', ' ') })
         cf.writeText(d.chapters.joinToString("\n") { "${it.para}\t${it.title.replace('\n', ' ').replace('\t', ' ')}" })
+        File(dir(ctx), "${b.id}.v2.imgs").writeText(d.pictures.joinToString("\n") { "${it.para}\t${it.src}" })
         prefs(ctx).edit().putInt("len_${b.id}", d.paras.size).apply()
         return d
+    }
+
+    /** Pictures for a cached book; books added before pictures were supported get them found once. */
+    private fun pictures(ctx: Context, b: Book, count: Int): List<Picture> {
+        val f = File(dir(ctx), "${b.id}.v2.imgs")
+        if (f.exists()) {
+            return f.readLines().filter { it.isNotEmpty() }.mapNotNull { l ->
+                val t = l.indexOf('\t'); if (t <= 0) null else l.substring(0, t).toIntOrNull()?.let { Picture(it, l.substring(t + 1)) }
+            }
+        }
+        var found: List<Picture> = emptyList()
+        if (b.format == "epub") {
+            try {
+                val fresh = Extract.document(File(dir(ctx), b.file), b.format)
+                if (fresh.paras.size == count) found = fresh.pictures
+            } catch (t: Throwable) {}
+        }
+        f.writeText(found.joinToString("\n") { "${it.para}\t${it.src}" })
+        return found
+    }
+
+    /** Decodes a picture from inside a book, scaled to about [maxW] pixels wide. */
+    fun picture(ctx: Context, b: Book, src: String, maxW: Int): android.graphics.Bitmap? {
+        val bytes = Extract.epubEntry(File(dir(ctx), b.file), src) ?: return null
+        val o = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, o)
+        if (o.outWidth <= 0) return null
+        var sample = 1
+        while (o.outWidth / (sample * 2) >= maxW) sample *= 2
+        return android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, android.graphics.BitmapFactory.Options().apply { inSampleSize = sample })
     }
 
     fun paragraphs(ctx: Context, b: Book): List<String> = doc(ctx, b).paras

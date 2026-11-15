@@ -15,12 +15,13 @@ function bkBuildSections() {
     for (let a = start; a < end; a += 250) secs.push({ start: a, end: Math.min(end, a + 250), title: c.title, first: a === start });
   });
   if (!secs.length) secs.push({ start: 0, end: S.paras.length, title: S.book.title, first: true });
+  secs.unshift({ front: true, start: 0, end: 0, title: 'Contents', first: true });
   BK.sections = secs; BK.sec = -1; BK.bookId = S.book.id;
 }
 function bkSectionOf(para) {
   let r = 0;
-  for (let i = 0; i < BK.sections.length; i++) { if (BK.sections[i].start <= para) r = i; else break; }
-  return r;
+  for (let i = 0; i < BK.sections.length; i++) { if (BK.sections[i].front) continue; if (BK.sections[i].start <= para) r = i; else break; }
+  return r || 1;
 }
 
 function bkRenderSection(si, opts = {}) {
@@ -29,8 +30,13 @@ function bkRenderSection(si, opts = {}) {
   const chapStarts = new Set(S.chapters.map((c) => c.para));
   const marks = noteMarks();
   let html = '';
+  if (sec.front) {
+    const toc = S.chapters.length ? S.chapters : [{ title: S.book.title, para: 0 }];
+    html = `<div class="titlepage"><div class="tp-cover">${coverHtml(S.book)}</div><h1>${esc(S.book.title)}</h1><div class="tp-author">${esc(S.book.author || '')}</div></div>
+      <div class="toc"><h2>Contents</h2>${toc.map((c) => `<div class="toc-item" data-p="${c.para}">${esc(c.title)}</div>`).join('')}</div>`;
+  }
   for (let i = sec.start; i < sec.end; i++) {
-    html += `<p data-i="${i}"${chapStarts.has(i) ? ' class="chap"' : ''}>${marks[i] || ''}<span class="tx">${esc(S.paras[i])}</span></p>`;
+    html += `${picturesHTML(i)}<p data-i="${i}"${chapStarts.has(i) ? ' class="chap"' : ''}>${marks[i] || ''}<span class="tx">${paraHTML(i)}</span></p>`;
   }
   const pg = $('#pages');
   pg.innerHTML = html;
@@ -51,6 +57,7 @@ function bkLayout() {
   const gap = spread ? Math.round(W * 0.09) : 48;
   const colW = (W - gap * (cols - 1)) / cols;
   pg.style.width = W + 'px'; pg.style.height = H + 'px';
+  pg.style.setProperty('--pageh', H + 'px');
   pg.style.columnWidth = colW + 'px'; pg.style.columnGap = gap + 'px'; pg.style.columnCount = 'auto';
   BK.cols = cols; BK.step = W + gap; BK.colStep = colW + gap;
   const n = Math.max(1, Math.round((pg.scrollWidth + gap) / BK.colStep));
@@ -70,7 +77,8 @@ function bkViewOfPara(i) {
 function bkTopPara() {
   const start = BK.view * BK.step;
   let res = BK.sections[BK.sec] ? BK.sections[BK.sec].start : 0;
-  for (const p of $('#pages').children) {
+  if (BK.sections[BK.sec] && BK.sections[BK.sec].front) return 0;
+  for (const p of $('#pages').querySelectorAll('p[data-i]')) {
     const rects = p.getClientRects(); if (!rects.length) continue;
     const pgLeft = $('#pages').getBoundingClientRect().left;
     // the paragraph is on this page if any of its pieces starts on it
@@ -83,7 +91,14 @@ function bkTopPara() {
 }
 
 function bkGo(v, { animate = true, quiet = false } = {}) {
-  BK.view = Math.max(0, Math.min(BK.views - 1, v));
+  const target = Math.max(0, Math.min(BK.views - 1, v));
+  if (animate && S.settings.pageTurn === 'flip' && target !== BK.view) {
+    const dir = target > BK.view ? 1 : -1;
+    BK.view = target;
+    flipFrame(dir, () => bkGo(target, { animate: false, quiet }));
+    return;
+  }
+  BK.view = target;
   const pg = $('#pages');
   pg.style.transition = animate ? '' : 'none';
   pg.style.transform = `translateX(${-BK.view * BK.step}px)`;
@@ -99,6 +114,12 @@ function bkGo(v, { animate = true, quiet = false } = {}) {
 
 function bkLabels() {
   const sec = BK.sections[BK.sec]; if (!sec) return;
+  if (sec.front) {
+    $('#bkHeadL').textContent = ''; $('#bkHeadR').textContent = '';
+    $('#bkFootL').textContent = BK.view === 0 ? 'Title page' : 'Contents';
+    $('#bkFootR').textContent = 'Turn the page to begin →';
+    return;
+  }
   const ch = sec.title || '';
   $('#bkHeadL').textContent = BK.cols === 2 ? S.book.title : ch;
   $('#bkHeadR').textContent = BK.cols === 2 ? ch : '';
@@ -133,6 +154,13 @@ function bkPrev() {
 }
 function bkTurnSection(si, opts) {
   const pg = $('#pages');
+  if (S.settings.pageTurn === 'flip') {
+    flipFrame(si > BK.sec ? 1 : -1, () => {
+      bkRenderSection(si, opts);
+      if (!S.playing) { S.segIdx = segFor(bkTopPara()); savePos(true); updatePlayer(); }
+    });
+    return;
+  }
   pg.classList.add('fade');
   setTimeout(() => {
     bkRenderSection(si, opts);
@@ -145,6 +173,7 @@ function bkTurnSection(si, opts) {
 function bkShow() {
   if (BK.bookId !== S.book.id || !BK.sections.length) bkBuildSections();
   const p = curPara();
+  if (p === 0 && S.segIdx === 0 && !S.playing) { bkRenderSection(0, {}); return; }
   bkRenderSection(bkSectionOf(p), { para: p });
   bkFollow(true);
 }
@@ -154,8 +183,8 @@ function bkFollow(force) {
   const seg = S.segs[S.segIdx]; if (!seg) return;
   const pi = seg[0];
   const sec = BK.sections[BK.sec];
-  if (!sec || pi < sec.start || pi >= sec.end) {
-    if (!force && Date.now() - BK.lastTurn < 8000) return;
+  if (!sec || sec.front || pi < sec.start || pi >= sec.end) {
+    if (!force && !(sec && sec.front) && Date.now() - BK.lastTurn < 8000) return;
     bkRenderSection(bkSectionOf(pi), { para: pi });
   }
   const el = $('#pages mark') || $(`#pages p[data-i="${pi}"]`);
@@ -170,6 +199,10 @@ function bkInit() {
   $('#turnNext').onclick = bkNext;
   $('#turnPrev').onclick = bkPrev;
   $('#bkListen').onclick = () => jumpTo(bkTopPara(), true);
+  $('#pages').addEventListener('click', (e) => {
+    const t = e.target.closest('.toc-item'); if (!t) return;
+    e.stopPropagation(); BK.lastTurn = 0; jumpTo(+t.dataset.p, false);
+  });
   $('#pageFrame').addEventListener('click', (e) => {
     if (String(window.getSelection() || '').trim()) return;
     const r = $('#pageFrame').getBoundingClientRect();

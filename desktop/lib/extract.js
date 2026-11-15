@@ -45,16 +45,37 @@ function resolvePath(base, href) {
   return parts.join('/');
 }
 
-function htmlToParagraphs(html) {
+const IMG_MARK = /\u0007([^\u0007]*)\u0007/g;
+/** Returns [{ text, imgs }] — imgs are picture paths (inside the EPUB) shown before the paragraph. */
+function htmlToParagraphsRich(html, dir) {
   let h = html;
   const b = /<body[^>]*>/i.exec(h);
   if (b) h = h.slice(b.index + b[0].length);
   h = h.replace(/<(script|style|head)\b[\s\S]*?<\/\1>/gi, ' ');
+  // pictures → invisible markers (kept in place, removed from the text afterwards)
+  h = h.replace(/<(?:img|image)\b[^>]*>/gi, (tag) => {
+    const src = attr(tag, 'src') || attr(tag, 'xlink:href') || attr(tag, 'href');
+    return src && !/^data:/i.test(src) ? `\u0007${resolvePath(dir || '', dec(src.split('#')[0]))}\u0007` : '';
+  });
+  // footnote references → [n]
+  h = h.replace(/<a\b([^>]*)>\s*(?:<sup[^>]*>)?\s*\[?(\d{1,3}|[*†‡])\]?\s*(?:<\/sup>)?\s*<\/a>/gi, (m, attrs, n) =>
+    (/noteref|footnote|endnote|#fn|#note|#ftn|#en\d/i.test(attrs) || /<sup/i.test(m)) ? `[${n}]` : m);
+  h = h.replace(/<sup[^>]*>\s*(\d{1,3}|[*†‡])\s*<\/sup>/gi, '[$1]');
   h = h.replace(/<\/?(p|div|h[1-6]|li|blockquote|tr|section|article|br|hr|dt|dd|pre)\b[^>]*>/gi, '\n\n');
   h = h.replace(/<[^>]*>/g, '');
   h = decodeEntities(h);
-  return h.split(/\n\s*\n/).map(ws).filter(Boolean);
+  const out = []; let pending = [];
+  for (const piece of h.split(/\n\s*\n/)) {
+    const imgs = []; let m;
+    IMG_MARK.lastIndex = 0;
+    while ((m = IMG_MARK.exec(piece))) if (m[1]) imgs.push(m[1]);
+    const text = ws(piece.replace(IMG_MARK, ''));
+    if (!text) { pending.push(...imgs); continue; }
+    out.push({ text, imgs: pending.concat(imgs) }); pending = [];
+  }
+  return { paras: out, trailing: pending };
 }
+function htmlToParagraphs(html) { return htmlToParagraphsRich(html).paras.map((p) => p.text); }
 
 function txt(text) {
   let t = text.replace(/\r\n?/g, '\n');
@@ -165,6 +186,7 @@ function epub(buf) {
 
   const navPaths = new Set(navItems.map((i) => resolvePath(e.base, dec(i.href))));
   const out = [];
+  let carryImgs = [];
   for (const idref of spine) {
     const item = manifest[idref];
     if (!item) continue;
@@ -174,15 +196,20 @@ function epub(buf) {
     if (title && /^(table of )?contents$/i.test(title)) continue;
     const html = e.read(path);
     if (!html) continue;
-    const ps = htmlToParagraphs(html);
-    if (!ps.length) continue;
+    const rich = htmlToParagraphsRich(html, dirOf(path));
+    const ps = rich.paras;
+    if (!ps.length) { carryImgs.push(...rich.trailing); continue; }
     let chap = title || null;
     if (!chap && toc.size === 0) {
       const h = /<h[1-3][^>]*>([\s\S]*?)<\/h[1-3]>/i.exec(html);
       const t = h ? clean(h[1]) : '';
       if (t && t.length < 120) chap = t;
     }
-    ps.forEach((text, k) => out.push({ text, chap: k === 0 ? chap : null }));
+    ps.forEach((pp, k) => {
+      const imgs = k === 0 ? carryImgs.concat(pp.imgs) : pp.imgs;
+      out.push({ text: pp.text, chap: k === 0 ? chap : null, imgs });
+    });
+    carryImgs = rich.trailing.slice();
   }
   if (!out.length) throw new Error("couldn't find any text in this EPUB");
   return out;
@@ -226,13 +253,14 @@ function normalize(ps) {
   if (s >= 0 && e > s) list = list.slice(s + 1, e);
   else if (s >= 0) list = list.slice(s + 1);
   const out = [];
-  let carry = null;
+  let carry = null; let carryImgs = [];
   for (const p of list) {
     const c = p.chap || carry;
-    carry = null;
-    if (PAGE_NUM.test(p.text)) { carry = c; continue; }
-    if (p.text.length <= 1200) out.push({ text: p.text, chap: c });
-    else splitLong(p.text).forEach((piece, k) => out.push({ text: piece, chap: k === 0 ? c : null }));
+    const imgs = carryImgs.concat(p.imgs || []);
+    carry = null; carryImgs = [];
+    if (PAGE_NUM.test(p.text)) { carry = c; carryImgs = imgs; continue; }
+    if (p.text.length <= 1200) out.push({ text: p.text, chap: c, imgs });
+    else splitLong(p.text).forEach((piece, k) => out.push({ text: piece, chap: k === 0 ? c : null, imgs: k === 0 ? imgs : [] }));
   }
   if (!out.length) throw new Error('no readable text found');
   return out;
@@ -263,7 +291,14 @@ async function documentFrom(buf, format) {
   const chapters = [];
   list.forEach((p, i) => { if (p.chap) chapters.push({ title: p.chap, para: i }); });
   if (chapters.length && chapters[0].para > 0) chapters.unshift({ title: 'Beginning', para: 0 });
-  return { paras: list.map((p) => p.text.replace(/\n/g, ' ')), chapters };
+  const images = [];
+  list.forEach((p, i) => { for (const src of p.imgs || []) images.push({ para: i, src }); });
+  return { paras: list.map((p) => p.text.replace(/\n/g, ' ')), chapters, images };
 }
 
-module.exports = { documentFrom, epubInfo, epubCover, decodeEntities, clean };
+/** Reads a file (e.g. a picture) from inside an EPUB. */
+function epubEntry(buf, name) {
+  try { const e = new Epub(buf); return e.readBuf(name); } catch (_) { return null; }
+}
+
+module.exports = { documentFrom, epubInfo, epubCover, epubEntry, decodeEntities, clean };

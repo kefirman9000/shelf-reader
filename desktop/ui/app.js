@@ -47,7 +47,8 @@ const WIDTHS = [900, 760, 620];
 async function saveSettings(patch) { S.settings = await api('/api/settings', { method: 'PUT', json: patch }); applyAppearance(); }
 function applyAppearance() {
   const s = S.settings;
-  document.body.className = 'theme-' + (s.theme || 0);
+  lastTheme = effectiveTheme();
+  document.body.className = 'theme-' + lastTheme + (document.body.classList.contains('focus') ? ' focus' : '');
   const t = $('#text');
   t.style.fontFamily = FONTS[s.font || 0];
   t.style.fontSize = (s.textSize || 19) + 'px';
@@ -125,6 +126,7 @@ async function renderLibrary() {
     $('#contPlay').onclick = async () => { await loadBook(last.id); play(); };
   }
 }
+$('#statsBtn').onclick = showStats;
 $('#filterSel').onchange = (e) => {
   if (e.target.value === '__manage') { manageCollections(); return; }
   saveSettings({ filter: e.target.value }).then(renderLibrary);
@@ -347,6 +349,8 @@ async function loadBook(id) {
   pause();
   const d = await api('/api/book/' + id);
   S.book = d.book; S.paras = d.paras; S.chapters = d.chapters; S.bookState = d.state;
+  S.prevOpened = d.prevOpened || 0;
+  indexPictures(d.images);
   S.segs = segments(S.paras);
   S.segIdx = segFor(d.state.pos || 0, d.state.off || 0);
   S.settings.lastBook = id;
@@ -357,6 +361,7 @@ async function openBook(id) {
   try { await loadBook(id); } catch (e) { toast("Couldn't open that book: " + e.message, 6000); return; }
   show('reader');
   renderReader();
+  showRecap(S.prevOpened); S.prevOpened = 0;
 }
 function segFor(para, off = 0) {
   const segs = S.segs; if (!segs.length) return 0;
@@ -381,21 +386,28 @@ function renderReader() {
   if (book) {
     S.renderedFor = null;
     $('#text').innerHTML = '';
-    requestAnimationFrame(() => { bkShow(); $('#pages').classList.toggle('listening', S.playing); highlight(true); });
+    requestAnimationFrame(() => {
+      bkShow();
+      $('#pages').classList.toggle('listening', S.playing);
+      if (!(BK.sections[BK.sec] || {}).front) highlight(true);
+    });
     return;
   }
   if (S.renderedFor !== S.book.id) {
     const chapStarts = new Set(S.chapters.map((c) => c.para));
     const marks = noteMarks();
     $('#text').innerHTML = S.paras.map((p, i) =>
-      `<p data-i="${i}"${chapStarts.has(i) ? ' class="chap"' : ''}><button class="go" title="Read from here">▶</button>${marks[i] || ''}<span class="tx">${esc(p)}</span></p>`).join('');
+      `${picturesHTML(i)}<p data-i="${i}"${chapStarts.has(i) ? ' class="chap"' : ''}><button class="go" title="Read from here">▶</button>${marks[i] || ''}<span class="tx">${paraHTML(i)}</span></p>`).join('');
     S.renderedFor = S.book.id; S.hlPara = -1;
   }
   highlight(true);
 }
 function noteMarks() {
   const m = {};
-  for (const n of S.bookState.notes || []) m[n.para] = `<span class="mk" title="${esc(n.text || 'Bookmark')}">${n.text ? '📝' : '🔖'}</span>`;
+  for (const n of S.bookState.notes || []) {
+    if (n.type === 'hl' && !n.text) continue;
+    m[n.para] = `<span class="mk" title="${esc(n.text || 'Bookmark')}">${n.text ? '📝' : '🔖'}</span>`;
+  }
   return m;
 }
 function refreshMarks() {
@@ -421,12 +433,12 @@ function highlight(forceScroll = false) {
   }
   if (S.hlPara >= 0 && S.hlPara !== pi) {
     const old = $(`${box} p[data-i="${S.hlPara}"]`);
-    if (old) { old.classList.remove('cur'); old.querySelector('.tx').textContent = S.paras[S.hlPara]; }
+    if (old) { old.classList.remove('cur'); old.querySelector('.tx').innerHTML = paraHTML(S.hlPara); }
   }
   const el = $(`${box} p[data-i="${pi}"]`); if (!el) return;
   el.classList.add('cur');
   const p = S.paras[pi];
-  el.querySelector('.tx').innerHTML = esc(p.slice(0, a)) + '<mark>' + esc(p.slice(a, b)) + '</mark>' + esc(p.slice(b));
+  el.querySelector('.tx').innerHTML = paraHTML(pi, a, b);
   const moved = S.hlPara !== pi; S.hlPara = pi;
   if (book) { bkFollow(forceScroll); $('#rChap').textContent = chapterTitle(pi) || S.book.author || ''; return; }
   if (forceScroll || (moved && Date.now() - lastUserScroll > 6000)) {
@@ -464,21 +476,16 @@ $('#layoutBtn').onclick = async () => {
   renderReader();
 };
 
-// Define bubble on word selection
+// Highlighter / define bubble on text selection; footnote links
 document.addEventListener('mouseup', (e) => {
-  const bubble = $('#defineBubble');
-  if (e.target === bubble) return;
-  setTimeout(() => {
-    const sel = window.getSelection();
-    const word = String(sel || '').trim();
-    if (S.view !== 'reader' || !word || word.includes(' ') || word.length > 40 || !sel.anchorNode || !($('#text').contains(sel.anchorNode) || $('#pages').contains(sel.anchorNode))) { bubble.hidden = true; return; }
-    const r = sel.getRangeAt(0).getBoundingClientRect();
-    bubble.textContent = `Define “${word}”`;
-    bubble.style.left = Math.max(8, r.left) + 'px'; bubble.style.top = Math.max(8, r.top - 34) + 'px';
-    bubble.hidden = false;
-    bubble.onclick = () => { bubble.hidden = true; define(word); };
-  }, 10);
+  if (e.target.closest && (e.target.closest('#selBubble') || e.target.closest('#fnPop'))) return;
+  setTimeout(showSelBubble, 10);
 });
+document.addEventListener('click', (e) => {
+  const fn = e.target.closest && e.target.closest('a.fn');
+  if (fn) { e.preventDefault(); e.stopPropagation(); showFootnote(fn); return; }
+  if (!e.target.closest || !e.target.closest('#fnPop')) $('#fnPop').hidden = true;
+}, true);
 async function define(word) {
   modal(`<h2>${esc(word)}</h2><p class="muted">Looking it up…</p>`, [['Close', null, true]]);
   try {
@@ -516,11 +523,15 @@ function showChapters() {
 function showNotes() {
   if (!S.book) return;
   const notes = S.bookState.notes || [];
-  openDrawer('Bookmarks & notes', notes.length ? notes.map((n, k) => `<div class="ditem" data-p="${n.para}"><div class="row"><div>
-      <div class="s">${esc(chapterTitle(n.para) || 'Paragraph ' + (n.para + 1))}</div>
-      ${n.text ? '📝 ' + esc(n.text) : '🔖 ' + esc(S.paras[n.para].slice(0, 90)) + '…'}</div>
+  const body = (n) => {
+    if (n.type === 'hl') return `<span class="swatch sw-${esc(n.color || 'yellow')}"></span>“${esc((n.quote || S.paras[n.para].slice(n.start, n.end)).slice(0, 140))}”${n.text ? '<br>📝 ' + esc(n.text) : ''}`;
+    return n.text ? '📝 ' + esc(n.text) : '🔖 ' + esc(S.paras[n.para].slice(0, 90)) + '…';
+  };
+  openDrawer('Bookmarks, highlights & notes', (notes.length ? `<div class="dsearch"><button id="exportNotes">Export to a file…</button></div>` : '') + (notes.length ? notes.map((n, k) => `<div class="ditem" data-p="${n.para}"><div class="row"><div>
+      <div class="s">${esc(chapterTitle(n.para) || 'Paragraph ' + (n.para + 1))}</div>${body(n)}</div>
       <button class="icon" data-del="${k}" title="Delete">✕</button></div></div>`).join('')
-    : '<p class="muted" style="padding:10px">No bookmarks yet. Right-click a paragraph to add one, or press <kbd>B</kbd> while listening.</p>');
+    : '<p class="muted" style="padding:10px">Nothing here yet. Select text to highlight it or add a note, right-click a paragraph to bookmark it, or press <kbd>B</kbd> while listening.</p>'));
+  const ex = $('#exportNotes'); if (ex) ex.onclick = exportNotes;
 }
 function showFind(q = '') {
   if (!S.book) return;
@@ -802,6 +813,7 @@ async function finished() {
   savePos(true); updatePlayer();
   const cols = new Set(S.bookState.collections || []); cols.add('Finished'); cols.delete('Want to read');
   await saveState({ collections: [...cols] });
+  api('/api/stats/finished', { method: 'POST', json: { id: S.book.id, title: S.book.title, author: S.book.author } }).catch(() => {});
   toast(`Finished “${S.book.title}” 🎉`);
 }
 function jumpTo(para, startPlaying) {
@@ -924,6 +936,10 @@ function openSettings() {
     <div class="setrow"><label>Font</label><select id="sFont">${opt(['Serif', 'Sans-serif', 'Monospace'], s.font || 0)}</select></div>
     <div class="setrow"><label>Margins</label><select id="sMargin">${opt(['Narrow', 'Medium', 'Wide'], s.margin ?? 1)}</select></div>
     <div class="setrow"><label>Text size</label><input type="range" id="sSize" min="13" max="34" value="${s.textSize || 19}" style="flex:1"></div>
+    <div class="setrow"><label>Page turn</label><select id="sTurn"><option value="slide">Slide</option><option value="flip" ${s.pageTurn === 'flip' ? 'selected' : ''}>Flip</option></select></div>
+    <label class="check"><input type="checkbox" id="sNight" ${s.night && s.night.on ? 'checked' : ''}> Night mode on a schedule</label>
+    <div class="setrow"><label>Night mode</label>from <input type="time" id="sNightFrom" value="${esc((s.night && s.night.from) || '21:00')}"> to <input type="time" id="sNightTo" value="${esc((s.night && s.night.to) || '07:00')}">
+      <select id="sNightTheme">${opt(['Dark', 'Light', 'Sepia', 'Black'], (s.night && s.night.theme) ?? 3)}</select></div>
     <h3>Reading aloud</h3>
     <div class="setrow"><button id="sVoices" class="primary">Voice options: natural &amp; premium voices…</button></div>
     <label class="check"><input type="checkbox" id="sClutter" ${s.skipClutter !== false ? 'checked' : ''}> Skip page numbers, footnote markers, links and scan notices</label>
@@ -932,6 +948,8 @@ function openSettings() {
     <h3>Pronunciation fixes</h3>
     <div id="fixList">${(s.fixes || []).map((f, i) => `<div class="fix"><span style="flex:1"><b>${esc(f.from)}</b> → ${esc(f.to || '(skip)')}</span><button class="danger" data-fx="${i}">Delete</button></div>`).join('') || '<p class="muted">None yet.</p>'}</div>
     <div class="setrow"><input id="fxFrom" placeholder="Word as written" style="flex:1"><input id="fxTo" placeholder="Say it as" style="flex:1"><button id="fxAdd">Add</button></div>
+    <h3>Sync with your phone</h3>
+    <div id="syncBox" class="muted">Loading…</div>
     <h3>Backup &amp; restore</h3>
     <p class="muted">Bring your phone library here: on your phone use Menu → Back up library, copy the .zip to this PC, then restore it (or drop it on this window).</p>
     <div class="setrow"><button id="sRestore">Restore from backup…</button><a href="/api/backup" download><button>Download a backup</button></a></div>
@@ -941,6 +959,10 @@ function openSettings() {
     <p class="muted"><kbd>Space</kbd> play/pause · <kbd>←</kbd>/<kbd>→</kbd> turn page (Book view) or paragraph (Scroll view) · <kbd>F</kbd> full screen · <kbd>Shift</kbd>+<kbd>←</kbd>/<kbd>→</kbd> chapter · <kbd>B</kbd> bookmark · <kbd>C</kbd> chapters · <kbd>Ctrl</kbd>+<kbd>F</kbd> search in book · media keys work too</p>`,
   [['Done', null, true]]);
   $('#sTheme').onchange = (e) => saveSettings({ theme: +e.target.value });
+  $('#sTurn').onchange = (e) => saveSettings({ pageTurn: e.target.value });
+  const saveNight = () => saveSettings({ night: { on: $('#sNight').checked, from: $('#sNightFrom').value || '21:00', to: $('#sNightTo').value || '07:00', theme: +$('#sNightTheme').value } });
+  ['#sNight', '#sNightFrom', '#sNightTo', '#sNightTheme'].forEach((id) => { $(id).onchange = saveNight; });
+  syncSettingsHTML().then((html) => { const box = $('#syncBox'); if (box) { box.classList.remove('muted'); box.innerHTML = html; bindSyncSettings(openSettings); } });
   $('#sFont').onchange = (e) => saveSettings({ font: +e.target.value });
   $('#sMargin').onchange = (e) => saveSettings({ margin: +e.target.value });
   $('#sSize').oninput = (e) => { $('#text').style.fontSize = e.target.value + 'px'; };

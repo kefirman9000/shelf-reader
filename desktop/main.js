@@ -32,9 +32,9 @@ if (!app.requestSingleInstanceLock()) {
         return true;
       },
       openPath: (p) => shell.openPath(p),
-      pickFolder: async () => {
+      pickFolder: async (title) => {
         const r = await dialog.showOpenDialog(win, {
-          title: 'Choose where to save the audio files',
+          title: title || 'Choose where to save the audio files',
           defaultPath: app.getPath('music'),
           properties: ['openDirectory', 'createDirectory']
         });

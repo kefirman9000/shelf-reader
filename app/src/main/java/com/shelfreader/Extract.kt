@@ -9,7 +9,8 @@ import java.util.zip.ZipFile
 /** Turns EPUB / TXT / PDF files into paragraphs plus a chapter list. */
 object Extract {
 
-    private class P(val text: String, var chap: String?)
+    private class P(val text: String, var chap: String?, var imgs: List<String> = emptyList())
+    class Rich(val paras: List<Pair<String, List<String>>>, val trailing: List<String>)
     private class Item(val href: String, val type: String, val props: String)
 
     fun document(file: File, format: String): Doc {
@@ -23,7 +24,9 @@ object Extract {
         val chapters = ArrayList<Chapter>()
         list.forEachIndexed { i, p -> p.chap?.let { chapters += Chapter(it, i) } }
         if (chapters.isNotEmpty() && chapters[0].para > 0) chapters.add(0, Chapter("Beginning", 0))
-        return Doc(list.map { it.text }, chapters)
+        val images = ArrayList<Picture>()
+        list.forEachIndexed { i, p -> for (src in p.imgs) images += Picture(i, src) }
+        return Doc(list.map { it.text }, chapters, images)
     }
 
     // ---------- TXT ----------
@@ -97,6 +100,11 @@ object Extract {
         }
     }
 
+    /** Raw bytes of a file (e.g. a picture) inside an EPUB. */
+    fun epubEntry(file: File, name: String): ByteArray? = try {
+        ZipFile(file).use { z -> z.getEntry(name)?.let { e -> z.getInputStream(e).use { it.readBytes() } } }
+    } catch (t: Throwable) { null }
+
     private fun clean(s: String) = decodeEntities(s.replace(Regex("<[^>]*>"), " ")).replace(Regex("\\s+"), " ").trim()
 
     private fun decode(s: String): String = try { URLDecoder.decode(s.replace("+", "%2B"), "UTF-8") } catch (t: Throwable) { s }
@@ -153,6 +161,7 @@ object Extract {
             val navPaths = navItems.map { resolvePath(base, decode(it.href)) }.toSet()
             val contentsRe = Regex("^(table of )?contents$", RegexOption.IGNORE_CASE)
             val out = ArrayList<P>()
+            var carryImgs: List<String> = emptyList()
             for (idref in spine) {
                 val item = manifest[idref] ?: continue
                 val path = resolvePath(base, decode(item.href.substringBefore('#')))
@@ -160,10 +169,13 @@ object Extract {
                 val title = toc[path]
                 if (title != null && contentsRe.matches(title)) continue
                 val html = e.read(path) ?: continue
-                val ps = htmlToParagraphs(html)
-                if (ps.isEmpty()) continue
+                val rich = htmlToParagraphsRich(html, dirOf(path))
+                if (rich.paras.isEmpty()) { carryImgs = carryImgs + rich.trailing; continue }
                 val chap = title ?: if (toc.isEmpty()) firstHeading(html) else null
-                ps.forEachIndexed { k, s -> out += P(s, if (k == 0) chap else null) }
+                rich.paras.forEachIndexed { k, (text, imgs) ->
+                    out += P(text, if (k == 0) chap else null, if (k == 0) carryImgs + imgs else imgs)
+                }
+                carryImgs = rich.trailing
             }
             if (out.isEmpty()) throw Exception("couldn't find any text in this EPUB")
             return out
@@ -187,6 +199,39 @@ object Extract {
             }
         }
         return parts.joinToString("/")
+    }
+
+    private val imgMark = Regex("\u0007([^\u0007]*)\u0007")
+
+    /** Paragraphs plus the pictures (paths inside the EPUB) shown before each one. */
+    fun htmlToParagraphsRich(html0: String, dir: String): Rich {
+        var h = html0
+        val body = Regex("<body[^>]*>", RegexOption.IGNORE_CASE).find(h)
+        if (body != null) h = h.substring(body.range.last + 1)
+        h = h.replace(Regex("(?is)<(script|style|head)\\b.*?</\\1>"), " ")
+        h = Regex("<(?:img|image)\\b[^>]*>", RegexOption.IGNORE_CASE).replace(h) { m ->
+            val src = attr(m.value, "src") ?: attr(m.value, "xlink:href") ?: attr(m.value, "href")
+            if (src == null || src.startsWith("data:", true)) "" else "\u0007" + resolvePath(dir, decode(src.substringBefore('#'))) + "\u0007"
+        }
+        h = Regex("<a\\b([^>]*)>\\s*(?:<sup[^>]*>)?\\s*\\[?(\\d{1,3}|[*†‡])\\]?\\s*(?:</sup>)?\\s*</a>", RegexOption.IGNORE_CASE).replace(h) { m ->
+            val attrs = m.groupValues[1]
+            if (Regex("noteref|footnote|endnote|#fn|#note|#ftn|#en\\d", RegexOption.IGNORE_CASE).containsMatchIn(attrs) || m.value.contains("<sup", true))
+                "[" + m.groupValues[2] + "]" else m.value
+        }
+        h = Regex("<sup[^>]*>\\s*(\\d{1,3}|[*†‡])\\s*</sup>", RegexOption.IGNORE_CASE).replace(h) { "[" + it.groupValues[1] + "]" }
+        h = h.replace(Regex("(?i)</?(p|div|h[1-6]|li|blockquote|tr|section|article|br|hr|dt|dd|pre)\\b[^>]*>"), "\n\n")
+        h = h.replace(Regex("<[^>]*>"), "")
+        h = decodeEntities(h)
+        val out = ArrayList<Pair<String, List<String>>>()
+        var pending = ArrayList<String>()
+        for (piece in h.split(Regex("\n\\s*\n"))) {
+            val imgs = imgMark.findAll(piece).map { it.groupValues[1] }.filter { it.isNotEmpty() }.toList()
+            val text = piece.replace(imgMark, "").replace(Regex("\\s+"), " ").trim()
+            if (text.isEmpty()) { pending.addAll(imgs); continue }
+            out += text to (pending + imgs)
+            pending = ArrayList()
+        }
+        return Rich(out, pending)
     }
 
     fun htmlToParagraphs(html0: String): List<String> {
@@ -249,12 +294,15 @@ object Extract {
         else if (s >= 0) list = list.subList(s + 1, list.size)
         val out = ArrayList<P>()
         var carry: String? = null
+        var carryImgs: List<String> = emptyList()
         for (p in list) {
             val c = p.chap ?: carry
+            val imgs = carryImgs + p.imgs
             carry = null
-            if (pageNum.matches(p.text)) { carry = c; continue }   // stray page numbers
-            if (p.text.length <= 1200) out += P(p.text, c)
-            else splitLong(p.text).forEachIndexed { k, piece -> out += P(piece, if (k == 0) c else null) }
+            carryImgs = emptyList()
+            if (pageNum.matches(p.text)) { carry = c; carryImgs = imgs; continue }   // stray page numbers
+            if (p.text.length <= 1200) out += P(p.text, c, imgs)
+            else splitLong(p.text).forEachIndexed { k, piece -> out += P(piece, if (k == 0) c else null, if (k == 0) imgs else emptyList()) }
         }
         if (out.isEmpty()) throw Exception("no readable text found")
         return out
