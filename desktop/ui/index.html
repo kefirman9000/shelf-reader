@@ -39,6 +39,8 @@
       <div class="toolbar">
         <select id="filterSel" title="Show"></select>
         <button id="statsBtn" title="Reading stats">📊 Stats</button>
+        <button id="queueBtn" title="Books that play one after another">⏭ Up next</button>
+        <button id="searchAllBtn" title="Find a word or phrase in all your books">🔎 In books</button>
         <div class="spacer"></div>
         <label class="muted">View</label>
         <select id="viewSel"><option value="0">Shelf</option><option value="1">Grid</option><option value="2">List</option></select>
@@ -90,12 +92,13 @@
       <div id="pInfo"><div id="pTitle"></div><div id="pStatus" class="muted"></div></div>
       <div class="pctl">
         <button id="pChapPrev" title="Previous chapter (Shift+←)">⏮</button>
-        <button id="pPrev" title="Previous paragraph (←)">◀</button>
+        <button id="pPrev" title="Back 15 seconds (←). Double-click: repeat the last sentence">↺15</button>
         <button id="pPlay" class="primary big" title="Play / pause (Space)">▶</button>
-        <button id="pNext" title="Next paragraph (→)">▶</button>
+        <button id="pNext" title="Forward 30 seconds (→)">30↻</button>
         <button id="pChapNext" title="Next chapter (Shift+→)">⏭</button>
       </div>
       <div class="popts">
+        <button id="histBtn" class="icon" title="Places you jumped from (H)">🕘</button>
         <select id="rateSel" title="Speed for this book"></select>
         <select id="voiceSel" title="Voice for this book"></select>
         <select id="sleepSel" title="Sleep timer">
@@ -123,6 +126,7 @@
   <script src="engines.js"></script>
   <script src="features.js"></script>
   <script src="book.js"></script>
+  <script src="speechtext.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

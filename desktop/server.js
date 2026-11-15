@@ -227,6 +227,38 @@ function startServer(opts = {}) {
       return res.end(data);
     }
 
+    // ---------- search inside every book ----------
+    if (p === '/api/search-books') {
+      const q = (url.searchParams.get('q') || '').trim().toLowerCase();
+      if (q.length < 2) return send(res, 200, []);
+      const out = [];
+      for (const b of store.list()) {
+        let d; try { d = await store.doc(b); } catch (_) { continue; }
+        let n = 0;
+        for (let i = 0; i < d.paras.length && n < 6; i++) {
+          const t = d.paras[i]; const k = t.toLowerCase().indexOf(q);
+          if (k < 0) continue;
+          const a = Math.max(0, k - 70), e = Math.min(t.length, k + q.length + 90);
+          let ch = null; for (const c of d.chapters) { if (c.para <= i) ch = c.title; else break; }
+          out.push({ id: b.id, title: b.title, author: b.author, para: i, chapter: ch, pct: Math.round((i + 1) * 100 / d.paras.length),
+            snippet: (a > 0 ? '…' : '') + t.slice(a, e) + (e < t.length ? '…' : ''), at: k - a + (a > 0 ? 1 : 0), len: q.length });
+          n++;
+        }
+        if (out.length >= 200) break;
+      }
+      return send(res, 200, out);
+    }
+
+    // ---------- audio clips saved with bookmarks ----------
+    if ((mm = m(/^\/api\/clip\/([\w-]+)\/([\w.-]+)$/))) {
+      const dir = path.join(store.dir, 'clips', mm[1]);
+      const f = path.join(dir, path.basename(mm[2]));
+      if (req.method === 'PUT') { fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(f, await readBody(req, 30 * 1024 * 1024)); return send(res, 200, { ok: true, file: path.basename(f) }); }
+      if (req.method === 'DELETE') { try { fs.unlinkSync(f); } catch (_) {} return send(res, 200, { ok: true }); }
+      if (!fs.existsSync(f)) return send(res, 404, 'no clip', 'text/plain');
+      return send(res, 200, fs.readFileSync(f), f.endsWith('.mp3') ? 'audio/mpeg' : 'audio/wav');
+    }
+
     if ((mm = m(/^\/api\/cover\/([\w-]+)$/))) {
       const b = store.get(mm[1]);
       if (!b) return send(res, 404, 'no');

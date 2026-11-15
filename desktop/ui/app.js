@@ -144,6 +144,8 @@ function bookMenu(b, x, y) {
   showMenu(x, y, [
     ['Open', () => openBook(b.id)],
     ['Listen now', async () => { await loadBook(b.id); play(); }],
+    (S.settings.queue || []).includes(b.id) ? ['Remove from Up next', () => queueToggle(b)] : ['Add to Up next', () => queueToggle(b)],
+    ['About this book…', () => aboutBook(b)],
     null,
     ['Collections…', () => editCollections(b)],
     ['Edit title & author…', () => editBook(b)],
@@ -318,7 +320,7 @@ function segments(paras) {
   });
   return out;
 }
-const RE_FOOT = /\[(\d{1,3}|[a-zA-Z*†‡])\]|\{\d{1,3}\}|(?<=[.,;:”"])\d{1,3}(?=\s|$)/g;
+const RE_FOOT = /\[(\d{1,3}|[a-zA-Z*†‡])\]|\{\d{1,3}\}|(?<=\p{L}[.,;:”"])\d{1,3}(?=\s|$)/gu;
 const RE_URL = /https?:\/\/\S+|www\.\S+/g;
 const RE_ILL = /\[(Illustration|Image|Picture|Sidenote)[^\]]*\]/gi;
 const RE_PAGE = /^\[?(page|pg\.?|p\.)\s*\d+\]?$/i;
@@ -327,9 +329,10 @@ let fixRules = [];
 function buildFixRules() {
   fixRules = (S.settings.fixes || []).filter((f) => f.from).map((f) => [new RegExp('(?<![\\p{L}\\p{N}])' + f.from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?![\\p{L}\\p{N}])', 'giu'), f.to || '']);
 }
-function spoken(text) {
+function spoken(text, pi) {
   let t = text;
   if (S.settings.skipClutter !== false) {
+    if (pi != null && (S.skipParas?.has(pi) || S.headers?.has(S.paras[pi]) || SpeechText.isPageNumber(S.paras[pi]))) return null;
     if (RE_BOILER.test(t)) return null;
     if (/^\s*\[Footnote/i.test(t)) return null;
     t = t.replace(RE_FOOT, '').replace(RE_ILL, '').replace(RE_URL, '');
@@ -339,6 +342,7 @@ function spoken(text) {
     if (!core || /^\d+$/.test(core)) return null;
   }
   for (const [re, to] of fixRules) t = t.replace(re, to);
+  if (S.settings.speakNumbers !== false) t = SpeechText.normalize(t);
   t = t.trim();
   return t || null;
 }
@@ -348,7 +352,16 @@ async function loadBook(id) {
   if (S.book && S.book.id === id) return;
   pause();
   const d = await api('/api/book/' + id);
-  S.book = d.book; S.paras = d.paras; S.chapters = d.chapters; S.bookState = d.state;
+  S.book = d.book; S.paras = d.paras; S.bookState = d.state;
+  S.chapters = SpeechText.improveChapters(d.paras, d.chapters);
+  S.headers = SpeechText.headerLines(d.paras, d.book.title, d.book.author);
+  // a subtitle line merged into its chapter title ("CHAPTER IV" + "THE STORM") is read as part of the heading
+  S.skipParas = new Set();
+  for (const c of S.chapters) {
+    const nx = (S.paras[c.para + 1] || '').trim();
+    if (nx && nx.length < 70 && SpeechText.isHeadingOf(S.paras[c.para], c.title) && c.title.toLowerCase().endsWith(nx.toLowerCase().replace(/[.:]$/, ''))) S.skipParas.add(c.para + 1);
+  }
+  S.history = []; S.mediaCh = null;
   S.prevOpened = d.prevOpened || 0;
   indexPictures(d.images);
   S.segs = segments(S.paras);
@@ -460,6 +473,7 @@ const paraMenu = (e) => {
     ['Read aloud from here', () => jumpTo(i, true)],
     ['Bookmark this paragraph', () => addNote(i, '')],
     ['Add a note…', () => promptNote(i)],
+    ['Bookmark with an audio clip', () => saveClip(i)],
     ['Copy paragraph', () => navigator.clipboard.writeText(S.paras[i]).then(() => toast('Copied'))]
   ];
   if (sel && sel.split(/\s+/).length <= 3) items.push([`Define “${sel.slice(0, 30)}”`, () => define(sel)]);
@@ -517,13 +531,16 @@ function showChapters() {
   if (!S.book) return;
   if (!S.chapters.length) { toast('No chapters were found in this book.'); return; }
   const cur = chapterIndex(curPara());
-  openDrawer('Chapters', S.chapters.map((c, k) => `<div class="ditem${k === cur ? ' cur' : ''}" data-p="${c.para}">${esc(c.title)}</div>`).join(''));
+  openDrawer('Chapters', `<div class="dsearch"><button id="goPct">Go to a percentage… (G)</button></div>` +
+    S.chapters.map((c, k) => `<div class="ditem${k === cur ? ' cur' : ''}${c.level === 0 && S.chapters.some((x) => x.level === 1) ? ' part' : ''}" data-p="${c.para}" style="${c.level === 1 ? 'padding-left:30px' : ''}">${esc(c.title)}</div>`).join(''));
+  $('#goPct').onclick = (e) => { e.stopPropagation(); closeDrawer(); goToPercent(); };
   const el = $('#drawerBody .cur'); if (el) el.scrollIntoView({ block: 'center' });
 }
 function showNotes() {
   if (!S.book) return;
   const notes = S.bookState.notes || [];
   const body = (n) => {
+    if (n.type === 'clip') return `🔊 “${esc((n.quote || '').slice(0, 140))}” <button class="icon" data-clip="${esc(n.file)}" data-rate="${n.rate || 1}" title="Play the clip">▶</button> <a href="/api/clip/${S.book.id}/${esc(n.file)}" download="${esc(S.book.title.slice(0, 40))} clip.${esc(n.file.split('.').pop())}" title="Save the audio file">Save</a>`;
     if (n.type === 'hl') return `<span class="swatch sw-${esc(n.color || 'yellow')}"></span>“${esc((n.quote || S.paras[n.para].slice(n.start, n.end)).slice(0, 140))}”${n.text ? '<br>📝 ' + esc(n.text) : ''}`;
     return n.text ? '📝 ' + esc(n.text) : '🔖 ' + esc(S.paras[n.para].slice(0, 90)) + '…';
   };
@@ -532,6 +549,8 @@ function showNotes() {
       <button class="icon" data-del="${k}" title="Delete">✕</button></div></div>`).join('')
     : '<p class="muted" style="padding:10px">Nothing here yet. Select text to highlight it or add a note, right-click a paragraph to bookmark it, or press <kbd>B</kbd> while listening.</p>'));
   const ex = $('#exportNotes'); if (ex) ex.onclick = exportNotes;
+  $('#drawerBody').querySelectorAll('[data-clip]').forEach((x) => { x.onclick = (e) => { e.stopPropagation(); playClip(x.dataset.clip, +x.dataset.rate); }; });
+  $('#drawerBody').querySelectorAll('a[download]').forEach((x) => { x.onclick = (e) => e.stopPropagation(); });
 }
 function showFind(q = '') {
   if (!S.book) return;
@@ -550,6 +569,7 @@ function findInBook(q) {
 }
 $('#drawerBody').onclick = async (e) => {
   const del = e.target.closest('[data-del]');
+  if (del && $('#drawerTitle').textContent.startsWith('Bookmarks')) { const n = (S.bookState.notes || [])[+del.dataset.del]; if (n && n.type === 'clip') api(`/api/clip/${S.book.id}/${n.file}`, { method: 'DELETE' }).catch(() => {}); }
   if (del) { e.stopPropagation(); const notes = (S.bookState.notes || []).slice(); notes.splice(+del.dataset.del, 1); await saveState({ notes }); refreshMarks(); showNotes(); return; }
   const it = e.target.closest('[data-p]'); if (!it) return;
   if ($('#drawerTitle').textContent !== 'Search in book' || bookMode()) closeDrawer();
@@ -715,22 +735,54 @@ function speakFrom(i) {
 function speakNext(token) {
   if (token !== S.token || !S.playing) return;
   // skip pieces that shouldn't be read aloud
-  let text = null;
+  let items = null;
   while (S.segIdx < S.segs.length) {
-    const [pi, a, b] = S.segs[S.segIdx];
-    text = spoken(S.paras[pi].slice(a, b));
-    if (text) break;
+    items = segItems(S.segIdx);
+    if (items) break;
     S.segIdx++;
   }
-  if (!text) { finished(); return; }
+  if (!items) { finished(); return; }
+  S.items = items; S.segStartAt = Date.now();
   const vid = currentVoiceName();
-  if (engineOf(vid) === 'browser') browserSpeak(token, text);
-  else audioSpeak(token, vid, text);
+  if (engineOf(vid) === 'browser') browserSpeak(token, items, 0);
+  else audioSpeak(token, vid, items.map((x) => x.t).join(' '));
 }
+const natural = () => S.settings.naturalPauses !== false;
+/** What to say for a sentence, split into pieces with the pause after each (see speechtext.js). */
+function segItems(i) {
+  const [pi, a, b] = S.segs[i];
+  const ci = chapterIndex(pi); const ch = ci >= 0 ? S.chapters[ci] : null;
+  if (ch && ch.para === pi && natural() && SpeechText.isHeadingOf(S.paras[pi], ch.title)) {
+    // a chapter heading is announced like an audiobook: "Chapter Twelve." … "The Storm." …
+    return a === 0 ? SpeechText.chapterOpening(ch.title) : null;
+  }
+  const t = spoken(S.paras[pi].slice(a, b), pi);
+  if (!t) return null;
+  if (!natural()) return [{ t, gap: 0 }];
+  return engineOf(currentVoiceName()) === 'browser' ? SpeechText.pieces(t) : [{ t, gap: SpeechText.endPause(t) }];
+}
+/** How long to wait after a sentence: by its punctuation, plus more at paragraph and chapter ends. */
+function gapAfter(k) {
+  if (!natural()) return 0;
+  const it = S.items || [];
+  let g = it.length ? it[it.length - 1].gap : 280;
+  const seg = S.segs[k], nx = S.segs[k + 1];
+  if (seg && nx && nx[0] !== seg[0]) g += 260;
+  if (seg && nx && chapterIndex(nx[0]) !== chapterIndex(seg[0])) g += 900;
+  const browser = engineOf(currentVoiceName()) === 'browser';
+  return SpeechText.vary(Math.max(0, g / currentRate() - (browser ? 140 : 40)));
+}
+/** A tiny, steady change of pace from paragraph to paragraph (±2%), so long listening doesn't sound mechanical. */
+const paceFor = (pi) => (natural() ? 1 + (((pi * 7919) % 41) - 20) / 1000 : 1);
 
 /** Called when a sentence finishes, whatever voice engine read it. */
 function segDone(token) {
   if (token !== S.token) return;
+  const wait = gapAfter(S.segIdx);
+  if (wait > 0) setTimeout(() => segAdvance(token), wait); else segAdvance(token);
+}
+function segAdvance(token) {
+  if (token !== S.token || !S.playing) return;
   const k = S.segIdx; const next = k + 1;
   if (S.sleepChapter && next < S.segs.length && chapterIndex(S.segs[next][0]) !== chapterIndex(S.segs[k][0])) {
     S.sleepChapter = false; S.segIdx = next; pause(); setSleep(0); return;
@@ -749,25 +801,31 @@ function speechFailed(token, message) {
   S.segIdx++; afterMove(); speakNext(token);
 }
 
-function browserSpeak(token, text) {
-  const u = new SpeechSynthesisUtterance(text);
+function browserSpeak(token, items, k) {
+  const u = new SpeechSynthesisUtterance(items[k].t);
   const v = S.voices.find((x) => x.name === currentVoiceName());
   if (v) { u.voice = v; u.lang = v.lang; }
-  u.rate = currentRate();
+  u.rate = currentRate() * paceFor(S.segs[S.segIdx][0]);
   u.onstart = () => { S.speechErrors = 0; };
-  u.onend = () => segDone(token);
+  u.onend = () => {
+    if (token !== S.token) return;
+    if (k + 1 < items.length) {
+      const wait = SpeechText.vary(Math.max(0, items[k].gap / currentRate() - 140));
+      setTimeout(() => { if (token === S.token && S.playing) browserSpeak(token, items, k + 1); }, wait);
+    } else segDone(token);
+  };
   u.onerror = (ev) => {
     if (token !== S.token || ev.error === 'interrupted' || ev.error === 'canceled') return;
     speechFailed(token);
   };
   S.utter = u; // keep a reference so the browser doesn't drop the callbacks
-  afterMove();
+  if (k === 0) afterMove();
   speechSynthesis.speak(u);
 }
 
 // Kokoro / Piper / cloud: generate audio for each sentence, a couple of sentences ahead.
 const AUD = { el: new Audio(), cache: new Map() };
-function segSpoken(i) { const [pi, a, b] = S.segs[i]; return spoken(S.paras[pi].slice(a, b)); }
+function segSpoken(i) { const it = segItems(i); return it ? it.map((x) => x.t).join(' ') : null; }
 function audioFor(i, vid, rate, text) {
   const key = `${i}|${vid}|${rate}`;
   let p = AUD.cache.get(key);
@@ -806,7 +864,11 @@ function stopAudio() {
   flushEngines();
   S.loadingVoice = false;
 }
-function afterMove() { highlight(); updatePlayer(); savePos(false); }
+function afterMove() {
+  highlight(); updatePlayer(); savePos(false);
+  const ci = chapterIndex(curPara());
+  if (ci !== S.mediaCh) { S.mediaCh = ci; setMediaSession(); }
+}
 async function finished() {
   S.playing = false; S.token++; keepAlive(false); stopAudio();
   S.segIdx = Math.max(0, S.segs.length - 1);
@@ -815,9 +877,135 @@ async function finished() {
   await saveState({ collections: [...cols] });
   api('/api/stats/finished', { method: 'POST', json: { id: S.book.id, title: S.book.title, author: S.book.author } }).catch(() => {});
   toast(`Finished “${S.book.title}” 🎉`);
+  const q = (S.settings.queue || []).filter((id) => id !== S.book.id && bookById(id));
+  if (q.length) {
+    const next = bookById(q[0]);
+    await saveSettings({ queue: q.slice(1) });
+    let cancelled = false;
+    toastAction(`Finished “${S.book.title}”. Up next: “${next.title}”…`, 'Cancel', () => { cancelled = true; }, 6000);
+    setTimeout(async () => { if (cancelled || S.playing) return; await loadBook(next.id); if (S.view === 'reader') renderReader(); play(); }, 6000);
+  }
+}
+
+// ---------- Up next ----------
+async function queueToggle(b) {
+  const q = (S.settings.queue || []).slice();
+  const i = q.indexOf(b.id);
+  if (i >= 0) q.splice(i, 1); else q.push(b.id);
+  await saveSettings({ queue: q });
+  toast(i >= 0 ? `Removed “${b.title}” from Up next` : `“${b.title}” will play after the books before it in Up next`);
+  renderQueueBtn();
+}
+function renderQueueBtn() {
+  const n = (S.settings.queue || []).filter((id) => bookById(id)).length;
+  const btn = $('#queueBtn'); if (btn) btn.textContent = `⏭ Up next${n ? ' (' + n + ')' : ''}`;
+}
+function showQueue() {
+  const q = (S.settings.queue || []).filter((id) => bookById(id));
+  const html = q.length
+    ? q.map((id, k) => { const b = bookById(id); return `<div class="ditem" data-qopen="${id}"><div class="row"><div><b>${k + 1}.</b> ${esc(b.title)}<div class="s">${esc(b.author || '')}</div></div>
+        <div>${k ? `<button class="icon" data-qup="${k}" title="Move up">▲</button>` : ''}<button class="icon" data-qdel="${k}" title="Remove">✕</button></div></div></div>`; }).join('')
+    : '<p class="muted" style="padding:10px">Nothing queued. Right-click a book and choose <b>Add to Up next</b>; when a book finishes, the next one starts by itself.</p>';
+  openDrawer('Up next', html);
+  $('#drawerBody').querySelectorAll('[data-qdel]').forEach((x) => { x.onclick = async (e) => { e.stopPropagation(); q.splice(+x.dataset.qdel, 1); await saveSettings({ queue: q }); renderQueueBtn(); showQueue(); }; });
+  $('#drawerBody').querySelectorAll('[data-qup]').forEach((x) => { x.onclick = async (e) => { e.stopPropagation(); const k = +x.dataset.qup; [q[k - 1], q[k]] = [q[k], q[k - 1]]; await saveSettings({ queue: q }); showQueue(); }; });
+  $('#drawerBody').querySelectorAll('[data-qopen]').forEach((x) => { x.onclick = (e) => { e.stopPropagation(); closeDrawer(); openBook(x.dataset.qopen); }; });
+}
+
+// ---------- search inside every book ----------
+function searchBooks(q0) {
+  openDrawer('Search inside your books', `<form class="dsearch" id="sbForm"><input id="sbQ" placeholder="Word or phrase in any book" value="${esc(q0 || '')}"><button>Search</button></form><div id="sbRes"></div>`);
+  const run = async () => {
+    const q = $('#sbQ').value.trim(); if (q.length < 2) return;
+    $('#sbRes').innerHTML = '<p class="muted" style="padding:10px">Searching…</p>';
+    let hits = [];
+    try { hits = await api('/api/search-books?q=' + encodeURIComponent(q)); } catch (e) { $('#sbRes').innerHTML = `<p class="muted" style="padding:10px">${esc(e.message)}</p>`; return; }
+    if (!hits.length) { $('#sbRes').innerHTML = '<p class="muted" style="padding:10px">Not found in any book.</p>'; return; }
+    $('#sbRes').innerHTML = `<p class="muted" style="padding:6px 10px">${hits.length}${hits.length >= 200 ? '+' : ''} places · click to read aloud from there</p>` + hits.map((h, k) => `<div class="ditem" data-sb="${k}">
+      <div class="s"><b>${esc(h.title)}</b> · ${esc(h.chapter || '')} · ${h.pct}%</div>${esc(h.snippet.slice(0, h.at))}<b>${esc(h.snippet.slice(h.at, h.at + h.len))}</b>${esc(h.snippet.slice(h.at + h.len))}</div>`).join('');
+    $('#sbRes').querySelectorAll('[data-sb]').forEach((x) => { x.onclick = async (e) => {
+      e.stopPropagation(); const h = hits[+x.dataset.sb]; closeDrawer();
+      await openBook(h.id); jumpTo(h.para, true);
+    }; });
+  };
+  $('#sbForm').onsubmit = (e) => { e.preventDefault(); run(); };
+  setTimeout(() => $('#sbQ').focus(), 0);
+  if (q0) run();
+}
+
+// ---------- about a book: description, subjects, more free books ----------
+async function aboutBook(b) {
+  modal(`<div class="detail"><div class="cv">${coverHtml(b)}</div><div><h2>${esc(b.title)}</h2><div>${esc(b.author || 'Unknown author')}</div><div id="abBody"><p class="muted">Looking it up on Open Library…</p></div></div></div><div id="abMore"></div>`, [['Close']]);
+  const author = (b.author || '').split(/,| and /)[0].trim();
+  let subjects = [];
+  try {
+    const q = new URLSearchParams({ title: b.title, fields: 'key,title,author_name,first_publish_year,subject,number_of_pages_median,edition_count', limit: '1' });
+    if (author) q.set('author', author);
+    const j = await (await fetch('https://openlibrary.org/search.json?' + q)).json();
+    const d = (j.docs || [])[0];
+    let desc = '';
+    if (d && d.key) {
+      try { const w = await (await fetch('https://openlibrary.org' + d.key + '.json')).json(); desc = typeof w.description === 'string' ? w.description : (w.description && w.description.value) || ''; } catch (_) {}
+    }
+    desc = desc.replace(/\[([^\]]+)\]\([^)]*\)/g, '$1').replace(/-{3,}[\s\S]*$/, '').trim();
+    subjects = ((d && d.subject) || []).filter((x) => x.length < 40 && !/accessible|protected|in library|lending|overdrive|large type|nyt:/i.test(x)).slice(0, 12);
+    const facts = [d && d.first_publish_year ? `First published ${d.first_publish_year}` : '', d && d.number_of_pages_median ? `about ${d.number_of_pages_median} pages` : '', d && d.edition_count ? `${d.edition_count} editions` : ''].filter(Boolean).join(' · ');
+    $('#abBody').innerHTML = (facts ? `<div class="muted" style="margin-top:6px">${esc(facts)}</div>` : '') +
+      `<p>${esc(desc ? (desc.length > 1100 ? desc.slice(0, 1100) + '…' : desc) : 'No description found.')}</p>` +
+      (subjects.length ? `<div class="chips">${subjects.map((x) => `<button class="chip" data-subj="${esc(x)}">${esc(x)}</button>`).join('')}</div>` : '') +
+      (d && d.key ? `<p class="muted small">From <a href="https://openlibrary.org${esc(d.key)}" target="_blank">Open Library</a></p>` : '');
+    $('#abBody').querySelectorAll('[data-subj]').forEach((x) => { x.onclick = () => { $('#modal').hidden = true; show('search'); $('#q').value = x.dataset.subj; runSearch(x.dataset.subj); }; });
+  } catch (_) { if ($('#abBody')) $('#abBody').innerHTML = '<p class="muted">Couldn\'t look this book up right now.</p>'; }
+  // more free books by the author, and on its main subject
+  const lists = [];
+  if (author) lists.push(['More by ' + author, author]);
+  if (subjects[0]) lists.push(['Free books about ' + subjects[0].toLowerCase(), subjects[0]]);
+  for (const [label, q] of lists) {
+    let r = [];
+    try { r = (await api(`/api/search?source=gutenberg&q=${encodeURIComponent(q)}`)).filter((x) => x.title.toLowerCase() !== b.title.toLowerCase()).slice(0, 8); } catch (_) {}
+    if (!r.length || !$('#abMore')) continue;
+    const box = document.createElement('div');
+    box.innerHTML = `<h3>${esc(label)}</h3><div class="ab-list">${r.map((x, k) => `<div class="result" data-k="${k}"><div class="thumb">${x.cover ? `<img loading="lazy" src="/api/img?url=${encodeURIComponent(x.cover)}" onerror="this.remove()">` : ''}</div><div><div class="t">${esc(x.title)}</div><div class="s">${esc(x.author || '')}</div></div></div>`).join('')}</div>`;
+    box.querySelectorAll('[data-k]').forEach((el) => { el.onclick = () => showDetails(r[+el.dataset.k]); });
+    $('#abMore').appendChild(box);
+  }
+}
+
+// ---------- audio clips with bookmarks ----------
+async function saveClip(i) {
+  if (!S.book) return;
+  let vid = currentVoiceName();
+  if (engineOf(vid) === 'browser') {
+    const g = extraVoiceOptions();
+    if (!g.length) { toast('Audio clips need a Kokoro, Piper or premium voice. Set one up in Voice options.', 7000); return; }
+    vid = g[0][1][0][0];
+  }
+  let k = S.segs[S.segIdx] && S.segs[S.segIdx][0] === i ? S.segIdx : segFor(i);
+  const [pi, a] = S.segs[k];
+  let b = S.segs[k][2];
+  if (b - a < 60 && S.segs[k + 1] && S.segs[k + 1][0] === pi) b = S.segs[k + 1][2];
+  const quote = S.paras[pi].slice(a, b).trim();
+  toast('Making the clip…', 60000);
+  try {
+    const r = await genAudio(vid, spoken(quote, pi) || quote, currentRate());
+    const ext = /mpeg|mp3/.test(r.blob.type) ? 'mp3' : 'wav';
+    const file = `clip-${Date.now()}.${ext}`;
+    await api(`/api/clip/${S.book.id}/${file}`, { method: 'PUT', body: r.blob, headers: { 'Content-Type': 'application/octet-stream' } });
+    const notes = (S.bookState.notes || []).slice();
+    notes.push({ type: 'clip', para: pi, start: a, end: b, quote, file, rate: r.extra || 1, text: '', time: Date.now() });
+    await saveState({ notes }); refreshMarks();
+    toastAction('Saved the clip with a bookmark.', '▶ Play', () => playClip(file, r.extra || 1));
+  } catch (e) { toast('Couldn\'t make the clip: ' + e.message, 7000); }
+}
+function playClip(file, rate) {
+  const a = new Audio(`/api/clip/${S.book.id}/${file}`);
+  a.preservesPitch = true; a.playbackRate = rate || 1;
+  if (S.playing) pause();
+  a.play().catch(() => {});
 }
 function jumpTo(para, startPlaying) {
   if (!S.book) return;
+  recordJump(para);
   S.segIdx = segFor(para);
   lastUserScroll = 0;
   savePos(true);
@@ -825,6 +1013,73 @@ function jumpTo(para, startPlaying) {
   else if (S.playing) speakFrom(S.segIdx);
   highlight(true); updatePlayer();
 }
+// ---------- getting around: 15/30 seconds, repeat, places you jumped from, go to % ----------
+function goSeg(i) {
+  if (!S.book || !S.segs.length) return;
+  S.segIdx = Math.max(0, Math.min(S.segs.length - 1, i));
+  lastUserScroll = 0;
+  savePos(true);
+  if (S.playing) speakFrom(S.segIdx);
+  highlight(true); updatePlayer();
+}
+/** Moves by about this many seconds of listening (estimated from the text at the current speed). */
+function skipTime(sec) {
+  if (!S.book) return;
+  const cps = 14.5 * currentRate();
+  let need = Math.abs(sec) * cps; let i = S.segIdx;
+  const len = (k) => S.segs[k][2] - S.segs[k][1];
+  if (sec < 0) { while (i > 0 && need > 0) { i--; need -= len(i); } }
+  else { while (i < S.segs.length - 1 && need > 0) { need -= len(i); i++; } }
+  goSeg(i);
+}
+/** Again: the sentence being read (or the one before, if it only just started). */
+function repeatSentence() {
+  if (!S.book) return;
+  const justStarted = S.playing && Date.now() - (S.segStartAt || 0) < 1500;
+  goSeg(S.playing && !justStarted ? S.segIdx : S.segIdx - 1);
+}
+function recordJump(toPara) {
+  if (!S.book || !S.segs.length) return;
+  const from = curPara();
+  if (Math.abs(toPara - from) < 4) return;
+  S.history = (S.history || []).filter((h) => Math.abs(h.para - from) > 2);
+  S.history.unshift({ seg: S.segIdx, para: from, at: Date.now() });
+  S.history.length = Math.min(S.history.length, 12);
+  toastAction('Jumped to a new place.', '↶ Go back', () => goBackTo(0));
+}
+function goBackTo(k) {
+  const h = (S.history || [])[k]; if (!h) return;
+  const here = { seg: S.segIdx, para: curPara(), at: Date.now() };
+  S.history.splice(k, 1);
+  if (Math.abs(here.para - h.para) > 2) S.history.unshift(here);
+  goSeg(h.seg);
+}
+function placeLabel(para) {
+  const pct = Math.floor((para + 1) * 100 / Math.max(1, S.paras.length));
+  return `${chapterTitle(para) || 'Beginning'} · ${pct}%`;
+}
+function ago(t) { const m = Math.round((Date.now() - t) / 60000); return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : `${Math.round(m / 60)} h ago`; }
+function showHistory(x, y) {
+  if (!S.book) return;
+  const h = S.history || [];
+  if (!h.length) { toast('No jumps yet. When you jump to another place, the place you left is kept here.'); return; }
+  showMenu(x, y, h.map((e, k) => [`↶ ${placeLabel(e.para)} (${ago(e.at)})`, () => goBackTo(k)]));
+}
+function goToPercent() {
+  if (!S.book) return;
+  const cur = Math.floor((curPara() + 1) * 100 / Math.max(1, S.paras.length));
+  modal(`<h2>Go to a place in the book</h2><div class="setrow"><label>Percent</label><input id="gPct" type="number" min="0" max="100" value="${cur}" style="width:90px"> %</div><p class="muted" id="gWhere"></p>`,
+    [['Cancel'], ['Go', () => { const v = Math.max(0, Math.min(100, +$('#gPct').value || 0)); jumpTo(Math.round(v / 100 * (S.paras.length - 1)), false); }, true]]);
+  const upd = () => { const v = Math.max(0, Math.min(100, +$('#gPct').value || 0)); $('#gWhere').textContent = chapterTitle(Math.round(v / 100 * (S.paras.length - 1))) || ''; };
+  $('#gPct').oninput = upd; upd(); setTimeout(() => $('#gPct').select(), 0);
+  $('#gPct').onkeydown = (e) => { if (e.key === 'Enter') { $('#modal').hidden = true; const v = Math.max(0, Math.min(100, +$('#gPct').value || 0)); jumpTo(Math.round(v / 100 * (S.paras.length - 1)), false); } };
+}
+function toastAction(msg, label, fn, ms = 6000) {
+  const t = $('#toast'); t.innerHTML = `${esc(msg)} <button class="link" id="toastAct">${esc(label)}</button>`; t.hidden = false;
+  $('#toastAct').onclick = () => { t.hidden = true; fn(); };
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => (t.hidden = true), ms);
+}
+
 function stepPara(d) {
   if (!S.book) return;
   const seg = S.segs[S.segIdx];
@@ -842,8 +1097,10 @@ function stepChapter(d) {
   jumpTo(t < 0 ? 0 : S.chapters[t].para, false);
 }
 $('#pPlay').onclick = toggle;
-$('#pPrev').onclick = () => stepPara(-1);
-$('#pNext').onclick = () => stepPara(1);
+$('#pPrev').onclick = () => skipTime(-15);
+$('#pPrev').ondblclick = (e) => { e.preventDefault(); repeatSentence(); };
+$('#pNext').onclick = () => skipTime(30);
+$('#histBtn').onclick = (e) => { const r = e.target.getBoundingClientRect(); showHistory(r.left, r.top - 8 - 34 * Math.min(12, (S.history || []).length || 1)); };
 $('#pChapPrev').onclick = () => stepChapter(-1);
 $('#pChapNext').onclick = () => stepChapter(1);
 $('#pInfo').onclick = () => { if (S.book) { show('reader'); renderReader(); } };
@@ -879,10 +1136,12 @@ keepAudio.src = silentWav(); keepAudio.volume = 0.01;
 function keepAlive(on) { if (on) keepAudio.play().catch(() => {}); else keepAudio.pause(); }
 function setMediaSession() {
   if (!('mediaSession' in navigator) || !S.book) return;
-  navigator.mediaSession.metadata = new MediaMetadata({ title: S.book.title, artist: S.book.author || '', album: 'Shelf Reader', artwork: [{ src: `/api/cover/${S.book.id}`, sizes: '300x450', type: 'image/jpeg' }] });
+  const ch = chapterTitle(curPara());
+  // Windows' media overlay and headsets show the chapter, with the book underneath
+  navigator.mediaSession.metadata = new MediaMetadata({ title: ch || S.book.title, artist: ch ? S.book.title : (S.book.author || ''), album: S.book.author || 'Shelf Reader', artwork: [{ src: `/api/cover/${S.book.id}`, sizes: '300x450', type: 'image/jpeg' }] });
   const h = (a, f) => { try { navigator.mediaSession.setActionHandler(a, f); } catch (_) {} };
-  h('play', play); h('pause', pause); h('previoustrack', () => stepPara(-1)); h('nexttrack', () => stepPara(1));
-  h('seekbackward', () => stepPara(-1)); h('seekforward', () => stepPara(1));
+  h('play', play); h('pause', pause); h('previoustrack', () => stepChapter(-1)); h('nexttrack', () => stepChapter(1));
+  h('seekbackward', () => skipTime(-15)); h('seekforward', () => skipTime(30));
 }
 
 // ---------- keyboard ----------
@@ -896,8 +1155,11 @@ document.addEventListener('keydown', (e) => {
   else if (pagesShown && !e.shiftKey && (e.key === 'ArrowRight' || e.key === 'PageDown')) { e.preventDefault(); bkNext(); }
   else if (pagesShown && !e.shiftKey && (e.key === 'ArrowLeft' || e.key === 'PageUp')) { e.preventDefault(); bkPrev(); }
   else if (e.key.toLowerCase() === 'f' && S.view === 'reader' && !e.ctrlKey) { bkSetFocus(!document.body.classList.contains('focus')); }
-  else if (e.key === 'ArrowRight' && S.book) { e.preventDefault(); e.shiftKey ? stepChapter(1) : stepPara(1); }
-  else if (e.key === 'ArrowLeft' && S.book) { e.preventDefault(); e.shiftKey ? stepChapter(-1) : stepPara(-1); }
+  else if (e.key === 'ArrowRight' && S.book) { e.preventDefault(); e.shiftKey ? stepChapter(1) : e.altKey ? stepPara(1) : skipTime(30); }
+  else if (e.key === 'ArrowLeft' && S.book) { e.preventDefault(); e.shiftKey ? stepChapter(-1) : e.altKey ? stepPara(-1) : skipTime(-15); }
+  else if (e.key.toLowerCase() === 'r' && S.book && !e.ctrlKey) repeatSentence();
+  else if (e.key.toLowerCase() === 'g' && S.book && !e.ctrlKey) goToPercent();
+  else if (e.key.toLowerCase() === 'h' && S.book && !e.ctrlKey) { const r = $('#histBtn').getBoundingClientRect(); showHistory(r.left, r.top - 8 - 34 * Math.min(12, (S.history || []).length || 1)); }
   else if (e.key.toLowerCase() === 'b' && S.book) addNote(curPara(), '');
   else if (e.key.toLowerCase() === 'c' && S.book && S.view === 'reader') showChapters();
 });
@@ -943,7 +1205,9 @@ function openSettings() {
       <select id="sNightTheme">${opt(['Dark', 'Light', 'Sepia', 'Black'], (s.night && s.night.theme) ?? 3)}</select></div>
     <h3>Reading aloud</h3>
     <div class="setrow"><button id="sVoices" class="primary">Voice options: natural &amp; premium voices…</button></div>
-    <label class="check"><input type="checkbox" id="sClutter" ${s.skipClutter !== false ? 'checked' : ''}> Skip page numbers, footnote markers, links and scan notices</label>
+    <label class="check"><input type="checkbox" id="sClutter" ${s.skipClutter !== false ? 'checked' : ''}> Skip page numbers, running headers, footnote markers, links and scan notices</label>
+    <label class="check"><input type="checkbox" id="sNatural" ${s.naturalPauses !== false ? 'checked' : ''}> Natural pauses: by punctuation, longer between paragraphs and chapters, and chapter headings announced like an audiobook</label>
+    <label class="check"><input type="checkbox" id="sNumbers" ${s.speakNumbers !== false ? 'checked' : ''}> Say numbers properly: “Chapter XII” → “Chapter Twelve”, Henry VIII, 1850s, $4.50, 3:30 pm, Dr. and St.</label>
     <p class="muted">Best voices: ${S.info.edge ? 'click <b>Better voices</b> at the top to open your library in Edge (Microsoft “Natural ★” voices) or Chrome (Google voices). ' : 'in Edge pick a voice marked “Natural ★”; in Chrome pick a “Google” voice. '}
       In this window, the built-in voices come from Windows.</p>
     <h3>Pronunciation fixes</h3>
@@ -969,6 +1233,8 @@ function openSettings() {
   $('#sSize').oninput = (e) => { $('#text').style.fontSize = e.target.value + 'px'; };
   $('#sSize').onchange = (e) => saveSettings({ textSize: +e.target.value });
   $('#sClutter').onchange = (e) => saveSettings({ skipClutter: e.target.checked }).then(() => { if (S.playing) speakFrom(S.segIdx); });
+  $('#sNatural').onchange = (e) => saveSettings({ naturalPauses: e.target.checked }).then(() => { if (S.playing) speakFrom(S.segIdx); });
+  $('#sNumbers').onchange = (e) => saveSettings({ speakNumbers: e.target.checked }).then(() => { if (S.playing) speakFrom(S.segIdx); });
   $('#fxAdd').onclick = async () => {
     const from = $('#fxFrom').value.trim(); if (!from) return;
     await saveSettings({ fixes: [...(S.settings.fixes || []), { from, to: $('#fxTo').value.trim() }] }); buildFixRules(); openSettings();
@@ -1133,3 +1399,7 @@ bkInit();
   }
 })();
 window.addEventListener('beforeunload', () => savePos(true));
+
+$('#queueBtn').onclick = showQueue;
+$('#searchAllBtn').onclick = () => searchBooks('');
+setTimeout(renderQueueBtn, 1500);
