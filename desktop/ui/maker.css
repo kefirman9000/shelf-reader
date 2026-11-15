@@ -161,3 +161,8 @@ button.icon { width: 36px; height: 36px; border-radius: 50%; padding: 0; }
 .seg button.on { background: var(--accent); color: var(--accent-fg); border-color: transparent; }
 #coverCredit { line-height: 1.35; }
 @media (max-width: 640px) { .cv-edit { grid-template-columns: 1fr; } }
+
+.pron { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--line); }
+.pron summary { cursor: pointer; }
+.prow { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 8px; margin-top: 6px; background: var(--panel2); }
+.prow span { flex: 1; }

@@ -121,6 +121,22 @@
       <div id="voices" class="voices"></div>
       <div id="voiceChosen" class="chosen muted small"></div>
 
+      <details class="pron" id="pronBox">
+        <summary><b>Pronunciations</b> <span class="muted small" id="pronCount"></span></summary>
+        <p class="muted small">Fix names or words the voice gets wrong. Write how it should sound, then press ▶ to check. You can load the list from the Shelf Reader apps' <b>ShelfReader-sync.json</b> file (Settings → Sync).</p>
+        <div id="pronRows"></div>
+        <div class="row wrap">
+          <input id="pronFrom" placeholder="Word in the book (e.g. Siobhan)" class="grow">
+          <input id="pronTo" placeholder="Say it like (e.g. Shi-vawn)" class="grow">
+          <button id="pronTest" class="icon" title="Hear it">▶</button>
+          <button id="pronAdd" class="primary">Add</button>
+        </div>
+        <div class="row wrap small">
+          <button id="pronImport">Load from a sync file…</button><input type="file" id="pronFile" accept=".json" hidden>
+          <button id="pronExport">Save the list…</button>
+        </div>
+      </details>
+
       <div class="dialog" id="dialogBox">
         <div class="row wrap">
           <label class="field inline"><span><b>Dialogue</b></span>
@@ -181,6 +197,8 @@
         <label class="check"><input type="checkbox" id="announce" checked> Read each chapter's title</label>
         <label class="check"><input type="checkbox" id="skipRefs" checked> Skip footnote markers like [12] and web links</label>
         <label class="check"><input type="checkbox" id="tags" checked> Add the cover, title and author to the files</label>
+        <label class="check"><input type="checkbox" id="natural" checked> Natural pauses by punctuation (commas, semicolons, dashes, question marks…)</label>
+        <label class="check"><input type="checkbox" id="numbers" checked> Say numbers properly: “Chapter XII” → “Chapter Twelve”, Henry VIII, 1850s, $4.50, Dr., St.</label>
       </div>
       <div class="sound">
         <b>Sound</b>
@@ -267,6 +285,7 @@
 
   <audio id="player" hidden></audio>
   <div id="toast" class="toast" hidden></div>
+  <script src="speechtext.js"></script>
   <script src="maker-formats.js"></script>
   <script src="maker-dialogue.js"></script>
   <script src="maker.js"></script>

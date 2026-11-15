@@ -278,7 +278,21 @@ async function openFile(file) {
   }
 }
 
+/** Books with no real chapter list get one from their headings (Roman numerals, PART ONE, …). */
+function improveBookChapters(b) {
+  const flat = []; const starts = [];
+  for (const c of b.chapters) { starts.push({ para: flat.length, title: c.title }); flat.push(...c.paras); }
+  const better = SpeechText.improveChapters(flat, starts);
+  const changed = better.length !== starts.length || better.some((c, i) => c.para !== starts[i].para);
+  if (!changed || better.length < 2) { b.chapters.forEach((c, i) => { c.title = (better[i] && better[i].para === starts[i].para ? better[i].title : SpeechText.titleCase(c.title)); }); return; }
+  const out = [];
+  if (better[0].para > 0) out.push({ title: 'Beginning', paras: flat.slice(0, better[0].para) });
+  better.forEach((c, i) => out.push({ title: c.title, level: c.level, paras: flat.slice(c.para, i + 1 < better.length ? better[i + 1].para : flat.length) }));
+  b.chapters = out.filter((c) => c.paras.length);
+}
 function setBook(b) {
+  improveBookChapters(b);
+  M.headers = SpeechText.headerLines(b.chapters.flatMap((c) => c.paras), b.title, b.author);
   for (const c of b.chapters) { c.on = true; c.chars = c.paras.reduce((a, p) => a + p.length + 1, 0); }
   if (b.cover?.data) b.cover.url = URL.createObjectURL(new Blob([b.cover.data], { type: b.cover.mime }));
   M.book = b;
@@ -1007,6 +1021,50 @@ $('#stingPlay').onclick = async () => {
   const p = $('#player'); p.src = URL.createObjectURL(new Blob([Formats.wav(pcm, RATE)], { type: 'audio/wav' })); p.play().catch(() => {});
 };
 
+// ---------- pronunciations ----------
+const pronList = () => PREF.fixes || [];
+function pronRules() {
+  return pronList().filter((f) => f.from).map((f) => [new RegExp('(?<![\\p{L}\\p{N}])' + f.from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?![\\p{L}\\p{N}])', 'giu'), f.to || '']);
+}
+function drawPron() {
+  const l = pronList();
+  $('#pronCount').textContent = l.length ? `(${l.length})` : '';
+  $('#pronRows').innerHTML = l.map((f, i) => `<div class="prow"><span><b>${esc(f.from)}</b> → ${esc(f.to || '(skip)')}</span><button class="icon" data-pt="${i}" title="Hear it">▶</button><button class="icon" data-pd="${i}" title="Remove">✕</button></div>`).join('');
+  $('#pronRows').querySelectorAll('[data-pd]').forEach((b) => { b.onclick = () => { const x = pronList().slice(); x.splice(+b.dataset.pd, 1); PREF.fixes = x; savePref(); drawPron(); M.samples.clear(); }; });
+  $('#pronRows').querySelectorAll('[data-pt]').forEach((b) => { b.onclick = () => pronTest(pronList()[+b.dataset.pt].to || pronList()[+b.dataset.pt].from, b); });
+}
+async function pronTest(word, btn) {
+  if (!M.voice) { toast('Choose a voice first.'); return; }
+  btn.textContent = '…';
+  try {
+    const pcm = await synth(M.voice, `${word}. I said, ${word}.`, effSpeed());
+    const p = $('#player'); p.src = URL.createObjectURL(new Blob([Formats.wav(pcm, RATE)], { type: 'audio/wav' })); await p.play();
+  } catch (e) { toast('Couldn\'t play that: ' + e.message); } finally { btn.textContent = '▶'; }
+}
+$('#pronAdd').onclick = () => {
+  const from = $('#pronFrom').value.trim(); if (!from) return;
+  PREF.fixes = [...pronList().filter((f) => f.from.toLowerCase() !== from.toLowerCase()), { from, to: $('#pronTo').value.trim() }];
+  savePref(); $('#pronFrom').value = ''; $('#pronTo').value = ''; drawPron(); M.samples.clear();
+};
+$('#pronTest').onclick = (e) => { const w = $('#pronTo').value.trim() || $('#pronFrom').value.trim(); if (w) pronTest(w, e.target); };
+$('#pronImport').onclick = () => $('#pronFile').click();
+$('#pronFile').onchange = async (e) => {
+  const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+  try {
+    const j = JSON.parse(await f.text());
+    const incoming = (j.fixes || (j.settings && j.settings.fixes) || []).filter((x) => x && x.from);
+    const have = new Set(pronList().map((x) => x.from.toLowerCase()));
+    const added = incoming.filter((x) => !have.has(x.from.toLowerCase())).map((x) => ({ from: x.from, to: x.to || '' }));
+    PREF.fixes = [...pronList(), ...added]; savePref(); drawPron(); M.samples.clear();
+    toast(added.length ? `Added ${added.length} pronunciation${added.length === 1 ? '' : 's'}.` : 'No new pronunciations in that file.');
+  } catch (_) { toast('That file couldn\'t be read. Choose ShelfReader-sync.json from your sync folder.'); }
+};
+$('#pronExport').onclick = () => download(new Blob([JSON.stringify({ fixes: pronList() }, null, 2)], { type: 'application/json' }), 'ShelfReader-pronunciations.json');
+drawPron();
+['#natural', '#numbers'].forEach((x) => { $(x).onchange = () => { PREF[x.slice(1)] = $(x).checked; savePref(); M.samples.clear(); }; });
+if (typeof PREF.natural === 'boolean') $('#natural').checked = PREF.natural;
+if (typeof PREF.numbers === 'boolean') $('#numbers').checked = PREF.numbers;
+
 // =====================================================================
 // 3. Export options
 // =====================================================================
@@ -1062,6 +1120,12 @@ function updateSummary() {
 // 4. Making the audiobook
 // =====================================================================
 const vkey = (who) => { const v = voiceFor(who); return v ? `${v.eng}|${v.provider || ''}|${v.id}` : ''; };
+/** Puts back sentences that were split after an initial ("A. Writer", "J. R. Smith"). */
+function joinInitials(list) {
+  const out = [];
+  for (const x of list) { const prev = out[out.length - 1]; if (prev && /(^|\s)[A-Z]\.\s*$/.test(prev) && !/\b[AP] M\.\s*$/.test(prev)) out[out.length - 1] += x; else out.push(x); }
+  return out;
+}
 const SCENE_BREAK = /^[\s*#~•·◆◇◊⁂§=_+—–-]{1,24}$/;
 /**
  * Splits a chapter into chunks small enough for the voice. Each chunk knows who speaks it, how long to pause
@@ -1079,8 +1143,10 @@ function textChunks(c, max, skipRefs, skipFirst, P = { para: 0.4, scene: 1.6 }) 
     const sg = c.segs[i];
     return c.paras[i].length < 140 && sg.some((x) => x.who !== null) && sg.filter((x) => x.who === null).reduce((a, x) => a + x.t.trim().length, 0) < 40;
   };
+  const furniture = M.headers || { has: () => false };
   c.paras.forEach((p0, i) => {
-    if (skipFirst && i === 0) return;
+    if (skipFirst && i < skipFirst) return;
+    if (skipRefs && (furniture.has(p0) || SpeechText.isPageNumber(p0))) return;
     if (SCENE_BREAK.test(p0) || /^\s*(\* ?){3}\s*$/.test(p0)) {
       if (out.length) out[out.length - 1].gap = Math.max(out[out.length - 1].gap, P.scene);
       return;
@@ -1091,6 +1157,8 @@ function textChunks(c, max, skipRefs, skipFirst, P = { para: 0.4, scene: 1.6 }) 
     for (const sg of segs) {
       let t = sg.t;
       if (skipRefs) t = t.replace(/\[(\d{1,3}|[*†‡])\]/g, '').replace(/https?:\/\/\S+/g, '');
+      for (const [re, to] of pronRules()) t = t.replace(re, to);
+      if ($('#numbers').checked) t = SpeechText.normalize(t);
       t = t.replace(/\s{2,}/g, ' ').trim();
       if (sg.who === null && multi) t = t.replace(/^[\s,;:—–-]+/, '');
       if (!t || !/[\p{L}\p{N}]/u.test(t)) continue;
@@ -1102,7 +1170,21 @@ function textChunks(c, max, skipRefs, skipFirst, P = { para: 0.4, scene: 1.6 }) 
     const quick = isQuickLine(i) && isQuickLine(i + 1);
     const paraGap = quick ? P.para * 0.55 * st.dlg : P.para;
     groups.forEach((g, gi) => {
-      const sentences = g.t.match(/[^.!?…]+(?:[.!?…]+["”’»)\]]*|$)\s*/g) || [g.t];
+      const sentences = joinInitials(g.t.match(/[^.!?…]+(?:[.!?…]+["”’»)\]]*|$)\s*/g) || [g.t]);
+      // local voices: one piece per sentence and clause, with a pause that fits its punctuation
+      if ($('#natural').checked && voiceFor(g.who).eng !== 'cloud') {
+        const lastGroup = gi === groups.length - 1;
+        const sp = Math.max(0.5, effSpeed());
+        const parts = sentences.flatMap((x) => (x.length > max ? [{ t: x, gap: SpeechText.endPause(x) }] : SpeechText.pieces(x.trim())));
+        parts.forEach((pc, k) => {
+          const end = k === parts.length - 1;
+          let gap = pc.gap / 1000 / sp;
+          if (end) gap = lastGroup ? Math.max(paraGap, gap) : Math.max(0.24, gap);
+          if (/[—–]["”’»]?$/.test(pc.t)) gap = Math.min(gap, 0.06);
+          if (pc.t.trim()) out.push({ t: pc.t.trim(), end: end && lastGroup, who: g.who, gap: SpeechText.vary(gap * 1000) / 1000, around: g.who !== null ? narration : '' });
+        });
+        return;
+      }
       let cur = '';
       const push = (t, end) => {
         t = t.trim(); if (!t) return;
@@ -1270,7 +1352,9 @@ async function make(o = {}) {
   // plan all the text first so progress and ETA are honest
   const max = Math.min(...[v, ...(dlgMode() === 'one' ? [] : [...Object.values(M.cast.chars), M.cast.quote])].filter((x) => x && x !== 'narr').map(maxChars));
   const plan = chapters.map((c, k) => {
-    const skipFirst = opt.announce && c.paras.length && c.paras[0].trim().toLowerCase() === c.title.trim().toLowerCase();
+    // the heading (and a subtitle line merged into the title) is announced instead of read
+    let skipFirst = opt.announce && c.paras.length && SpeechText.isHeadingOf(c.paras[0], c.title) ? 1 : 0;
+    if (skipFirst && c.paras[1] && c.paras[1].length < 70 && c.title.toLowerCase().endsWith(c.paras[1].trim().toLowerCase().replace(/[.:]$/, ''))) skipFirst = 2;
     let chunks = textChunks(c, max, opt.skipRefs, skipFirst, { para: paraPause, scene: scenePause });
     if (preview) { const lim = scene ? 1300 : 950; let n = 0; chunks = chunks.filter((x) => (n += x.t.length) < lim || n - x.t.length === 0); }
     return { c, k, chunks, chars: chunks.reduce((a, x) => a + x.t.length, 0) };
@@ -1316,7 +1400,11 @@ async function make(o = {}) {
         await say(`${b.title}${b.author ? '. By ' + b.author : ''}.`); await put(silence(chPause));
       }
       if (sting) { await put(sting); await put(silence(0.5)); }
-      if (opt.announce) { progress(`${p.c.title}: title`); await say(p.c.title.replace(/\s+/g, ' ') + '.'); await put(silence(Math.min(1.2, chPause * 0.6))); }
+      if (opt.announce) {
+        progress(`${p.c.title}: title`);
+        const opening = $('#natural').checked ? SpeechText.chapterOpening(p.c.title.replace(/\s+/g, ' ')) : [{ t: p.c.title.replace(/\s+/g, ' ') + '.', gap: 1000 }];
+        for (const [j, x] of opening.entries()) { await say(x.t); await put(silence(j === opening.length - 1 ? Math.min(1.2, chPause * 0.6) : x.gap / 1000)); }
+      }
       // Piper loads one voice at a time, so with several voices it makes each voice's lines together, then puts them in order
       const label = (j) => `${p.c.title}: ${Math.round((j / Math.max(1, p.chunks.length)) * 100)}%`;
       let pre = null;
