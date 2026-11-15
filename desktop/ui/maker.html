@@ -116,6 +116,29 @@
 
       <div id="voices" class="voices"></div>
       <div id="voiceChosen" class="chosen muted small"></div>
+
+      <div class="dialog" id="dialogBox">
+        <div class="row wrap">
+          <label class="field inline"><span><b>Dialogue</b></span>
+            <select id="dlgMode">
+              <option value="one">One voice reads everything</option>
+              <option value="quotes">A second voice reads everything in quotes</option>
+              <option value="cast">Each character gets their own voice</option>
+            </select>
+          </label>
+          <span id="dlgInfo" class="muted small"></span>
+        </div>
+        <div id="castPanel" hidden>
+          <div id="castRows" class="cast"></div>
+          <div class="row wrap">
+            <button id="castAuto">Pick voices again</button>
+            <button id="castMore" class="link" hidden></button>
+            <div class="spacer"></div>
+            <button id="convoBtn" class="primary">▶ Hear a conversation</button>
+          </div>
+          <div class="muted small" id="castNote"></div>
+        </div>
+      </div>
     </section>
 
     <!-- 3. Export -->
@@ -155,6 +178,24 @@
         <label class="check"><input type="checkbox" id="skipRefs" checked> Skip footnote markers like [12] and web links</label>
         <label class="check"><input type="checkbox" id="tags" checked> Add the cover, title and author to the files</label>
       </div>
+      <div class="sound">
+        <b>Sound</b>
+        <div class="checks">
+          <label class="check"><input type="checkbox" id="normalize" checked> Even out the volume (every voice and chapter at the same loudness)</label>
+          <label class="check"><input type="checkbox" id="roomTone"> Soft room tone, so pauses don't sound like dead air</label>
+        </div>
+        <div class="row wrap">
+          <label class="field inline"><span>Music between chapters</span>
+            <select id="sting">
+              <option value="none">None</option>
+              <option value="chime">Soft chime</option>
+              <option value="pad">Warm pad</option>
+              <option value="piano">Gentle piano notes</option>
+            </select>
+          </label>
+          <button id="stingPlay" class="icon" title="Hear it">▶</button>
+        </div>
+      </div>
       <div class="field">
         <span>Save to</span>
         <div class="row wrap">
@@ -189,6 +230,7 @@
   <audio id="player" hidden></audio>
   <div id="toast" class="toast" hidden></div>
   <script src="maker-formats.js"></script>
+  <script src="maker-dialogue.js"></script>
   <script src="maker.js"></script>
 </body>
 </html>

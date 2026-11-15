@@ -41,6 +41,7 @@ A drag-and-drop page that turns a book into audiobook files. Open it from the **
    - **Kokoro:** 23 natural English voices, free. They run on your computer, and the model downloads once (90 MB, or 330 MB for the faster graphics-card engine).
    - **Piper:** free voices in 30+ languages. Each voice downloads once.
    - **Premium:** OpenAI (with a narration-style box), ElevenLabs, Microsoft Azure or Google Cloud, using your own API key. The key is only sent to that service and is saved only if you tick "Remember".
+   - **Dialogue voices:** have a second voice read everything in quotes, or give **each character their own voice**. Characters are found from lines like *“…,” said Mara*, from *she said* and from back-and-forth exchanges, with a guess at whether each one is a man or a woman. Voices are picked automatically (change any of them), each character's ▶ plays one of their own lines, and **Hear a conversation** previews the busiest scene in the book.
 3. **Export options:**
    - **M4B audiobook:** one file with chapters, cover and tags (Chrome, Edge or Safari).
    - **MP3:** works everywhere, with chapter markers and cover.
@@ -50,6 +51,7 @@ A drag-and-drop page that turns a book into audiobook files. Open it from the **
    - Pauses between chapters and paragraphs.
    - Optional spoken title, author and chapter names.
    - Footnote markers and web links are skipped.
+   - **Sound:** evens out the volume so every voice and chapter is equally loud, adds an optional soft room tone so pauses aren't dead silence, and can play a short music cue (chime, warm pad or piano notes) between chapters.
 4. **Make it:** files download (several come as one .zip), or are saved into a folder you choose. Folder mode saves each chapter as soon as it's done and can pick up where it stopped. **Preview the first minute** checks everything before you start a long book.
 
 Your book never leaves your device, except when you choose a premium voice. That voice's text goes to the service you picked.

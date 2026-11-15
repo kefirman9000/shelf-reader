@@ -290,6 +290,8 @@ function setBook(b) {
   let s = ''; for (const x of sentences) { if ((s + x).length > 260 && s) break; s += x; }
   $('#sampleText').value = s.trim().slice(0, 400);
   M.samples.clear();
+  analyzeBook();
+  renderCast();
   updateSummary();
 }
 
@@ -577,12 +579,39 @@ function setEngine(eng) {
 }
 $$('.tab').forEach((t) => { t.onclick = () => setEngine(t.dataset.eng); });
 
+const gOf = (t) => (/\bfemale\b|\bwoman\b|^f$/i.test(t || '') ? 'f' : /\bmale\b|\bman\b|^m$/i.test(t || '') ? 'm' : '');
+/** The voices of one engine, as objects { eng, id, name, tags, best, gender, provider? }. Piper: the given language. */
+async function voiceList(eng, lang, bestOnly = true) {
+  if (eng === 'kokoro') return KOKORO_VOICES.map(([id, name, accent, g, best]) => ({ eng: 'kokoro', id, name, tags: `${accent} · ${g}`, best: !!best, gender: gOf(g.split(' ')[0]) }));
+  if (eng === 'piper') {
+    const cat = await piperCatalog();
+    const order = { high: 0, medium: 1, low: 2, x_low: 3 };
+    let vs = cat.filter((v) => v.language.code === lang);
+    if (bestOnly) {
+      const best = new Map();
+      for (const v of vs) { const b = best.get(v.name); if (!b || order[v.quality] < order[b.quality]) best.set(v.name, v); }
+      vs = [...best.values()];
+    }
+    vs.sort((a, b) => order[a.quality] - order[b.quality] || a.name.localeCompare(b.name));
+    return vs.map((v) => ({
+      eng: 'piper', id: v.key, name: v.name.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
+      tags: [PIPER_GENDER[v.name], { x_low: 'basic', low: 'good', medium: 'better', high: 'best' }[v.quality], M.piper.stored.includes(v.key) ? 'downloaded ✓' : fmtMB(piperSize(v))].filter(Boolean).join(' · '),
+      best: v.quality === 'high', gender: gOf(PIPER_GENDER[v.name])
+    }));
+  }
+  if (eng.startsWith('cloud:')) {
+    const p = eng.slice(6);
+    return (M.cloudVoices[p] || []).map((v) => ({ eng: 'cloud', provider: p, id: v.id, name: v.name, tags: v.tags, best: v.best, preview: v.sample, gender: gOf(String(v.tags || '').split(' · ').find((x) => /male|female/i.test(x)) || '') }));
+  }
+  return [];
+}
+const engKey = (v) => (v.eng === 'cloud' ? 'cloud:' + v.provider : v.eng);
+const piperLangOf = (v) => (v && v.eng === 'piper' ? v.id.split('-')[0] : $('#piperLang').value);
+
 async function drawVoices() {
   const box = $('#voices');
   let list = [];
-  if (M.eng === 'kokoro') {
-    list = KOKORO_VOICES.map(([id, name, accent, g, best]) => ({ eng: 'kokoro', id, name, tags: `${accent} · ${g}`, best: !!best }));
-  } else if (M.eng === 'piper') {
+  if (M.eng === 'piper') {
     box.innerHTML = '<div class="empty">Loading the voice list…</div>';
     let cat;
     try { cat = await piperCatalog(); } catch (e) { box.innerHTML = `<div class="empty">Couldn't load Piper voices: ${esc(e.message)}</div>`; return; }
@@ -594,25 +623,12 @@ async function drawVoices() {
       const want = PREF.piperLang || (navigator.language || 'en-US').replace('-', '_');
       sel.value = langs.has(want) ? want : [...langs.keys()].find((k) => k.startsWith(want.split('_')[0])) || 'en_US';
     }
-    const order = { high: 0, medium: 1, low: 2, x_low: 3 };
-    let vs = cat.filter((v) => v.language.code === sel.value);
-    if ($('#piperBestOnly').checked) {
-      const best = new Map();
-      for (const v of vs) { const b = best.get(v.name); if (!b || order[v.quality] < order[b.quality]) best.set(v.name, v); }
-      vs = [...best.values()];
-    }
-    vs.sort((a, b) => order[a.quality] - order[b.quality] || a.name.localeCompare(b.name));
-    list = vs.map((v) => ({
-      eng: 'piper', id: v.key, name: v.name.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
-      tags: [PIPER_GENDER[v.name], { x_low: 'basic', low: 'good', medium: 'better', high: 'best' }[v.quality], M.piper.stored.includes(v.key) ? 'downloaded ✓' : fmtMB(piperSize(v))].filter(Boolean).join(' · '),
-      best: v.quality === 'high'
-    }));
-  } else {
+    list = await voiceList('piper', sel.value, $('#piperBestOnly').checked);
+  } else if (M.eng === 'cloud') {
     const p = $('#cloudProv').value;
-    const vs = M.cloudVoices[p];
-    if (!vs) { box.innerHTML = `<div class="empty">Paste your ${esc(CLOUD[p].name)} API key above and press <b>Load voices</b>.</div>`; return; }
-    list = vs.map((v) => ({ eng: 'cloud', provider: p, id: v.id, name: v.name, tags: v.tags, best: v.best, preview: v.sample }));
-  }
+    if (!M.cloudVoices[p]) { box.innerHTML = `<div class="empty">Paste your ${esc(CLOUD[p].name)} API key above and press <b>Load voices</b>.</div>`; return; }
+    list = await voiceList('cloud:' + p);
+  } else list = await voiceList('kokoro');
   if (!list.length) { box.innerHTML = '<div class="empty">No voices here.</div>'; return; }
   box.innerHTML = list.map((v, i) => `
     <div class="voice ${M.voice && M.voice.eng === v.eng && M.voice.id === v.id ? 'sel' : ''}" data-i="${i}" role="button" tabindex="0">
@@ -636,6 +652,7 @@ function chooseVoice(v) {
   const idx = [...box.querySelectorAll('.voice')].findIndex((el) => el.querySelector('.vn').textContent.replace(' ★', '') === v.name);
   if (idx >= 0) box.querySelectorAll('.voice')[idx].classList.add('sel');
   showChosen(); updateSummary();
+  if (M.book && dlgMode() !== 'one') renderCast();
 }
 function showChosen() {
   const v = M.voice;
@@ -715,6 +732,239 @@ $('#cloudLoad').onclick = async () => {
 };
 $('#openaiStyle').onchange = () => { PREF.openaiStyle = $('#openaiStyle').value; savePref(); M.samples.clear(); };
 
+// ---------- dialogue: a voice for quotes, or one per character ----------
+M.dlg = null;                       // result of Dialogue.analyzeDialogue
+M.cast = { quote: null, chars: {}, gender: {} };   // voice objects; 'narr' = the narrator's voice
+let castShowAll = false;
+const dlgMode = () => $('#dlgMode').value;
+const castKey = () => 'cast:' + (M.book ? M.book.title : '');
+
+function analyzeBook() {
+  try { M.dlg = Dialogue.analyzeDialogue(M.book); } catch (e) { console.error(e); M.dlg = null; }
+  const saved = (PREF.casts || {})[castKey()];
+  M.cast = saved ? { quote: saved.quote || null, chars: saved.chars || {}, gender: saved.gender || {} } : { quote: null, chars: {}, gender: {} };
+  castShowAll = false;
+}
+function saveCast() {
+  PREF.casts = PREF.casts || {};
+  PREF.casts[castKey()] = M.cast;
+  const keys = Object.keys(PREF.casts); if (keys.length > 20) delete PREF.casts[keys[0]];
+  savePref();
+}
+const shownCharacters = () => {
+  if (!M.dlg) return [];
+  const all = M.dlg.characters;
+  const main = all.filter((c) => c.lines >= 2 || all.length <= 6).slice(0, 16);
+  return castShowAll ? all.slice(0, 60) : main;
+};
+const sameVoice = (a, b) => a && b && a !== 'narr' && b !== 'narr' && a.eng === b.eng && a.id === b.id && a.provider === b.provider;
+
+/** Picks voices: different from the narrator, matching each character's likely gender, best voices first. */
+async function autoCast(force) {
+  const n = M.voice; if (!n) return;
+  let pool;
+  try { pool = (await voiceList(engKey(n), piperLangOf(n))).filter((v) => !sameVoice(v, n)); } catch (_) { pool = []; }
+  if (!pool.length) return;
+  pool.sort((a, b) => (b.best ? 1 : 0) - (a.best ? 1 : 0));
+  const valid = (v) => v === 'narr' || pool.some((p) => sameVoice(p, v)) || (v && v.eng === n.eng);
+  const used = [];
+  const take = (g) => {
+    const opts = pool.filter((v) => (!g || v.gender === g) && !used.some((u) => sameVoice(u, v)));
+    const v = opts[0] || pool.filter((x) => !g || x.gender === g)[used.length % Math.max(1, pool.filter((x) => !g || x.gender === g).length)] || pool[used.length % pool.length];
+    used.push(v); return v;
+  };
+  if (force || !M.cast.quote || !valid(M.cast.quote)) {
+    const other = n.gender === 'm' ? 'f' : n.gender === 'f' ? 'm' : '';
+    M.cast.quote = take(other);
+  } else used.push(M.cast.quote);
+  for (const c of (M.dlg ? M.dlg.characters.slice(0, 60) : [])) {
+    const cur = M.cast.chars[c.name];
+    if (!force && cur && valid(cur)) { if (cur !== 'narr') used.push(cur); continue; }
+    M.cast.chars[c.name] = take(M.cast.gender[c.name] ?? c.gender);
+  }
+  saveCast();
+}
+
+async function renderCast() {
+  const mode = dlgMode();
+  PREF.dlgMode = mode; savePref();
+  const info = $('#dlgInfo');
+  if (!M.book) { info.textContent = 'Add a book to find its characters.'; $('#castPanel').hidden = true; return; }
+  const d = M.dlg;
+  if (!d || !d.quotes) { info.textContent = 'No quoted speech was found in this book.'; $('#castPanel').hidden = true; return; }
+  const named = d.characters.length;
+  info.textContent = `${d.quotes.toLocaleString()} quoted lines · ${named} character${named === 1 ? '' : 's'} found · ${Math.round((d.attributed / Math.max(1, d.quotes)) * 100)}% of lines matched to a speaker`;
+  if (mode === 'one') { $('#castPanel').hidden = true; updateSummary(); return; }
+  $('#castPanel').hidden = false;
+  if (!M.voice) { $('#castRows').innerHTML = '<div class="empty">Choose the narrator\'s voice above first.</div>'; return; }
+  await autoCast(false);
+  let pool = [];
+  try { pool = await voiceList(engKey(M.voice), piperLangOf(M.voice)); } catch (_) {}
+  const opt = (sel) => `<option value="narr" ${sel === 'narr' ? 'selected' : ''}>Narrator's voice</option>` +
+    pool.map((v, i) => `<option value="${i}" ${sel && sel !== 'narr' && sameVoice(sel, v) ? 'selected' : ''}>${esc(v.name)}${v.best ? ' ★' : ''} · ${esc(v.tags || '')}</option>`).join('');
+  const gSel = (name, g) => `<select class="cg" data-n="${esc(name)}" title="Man or woman (used when picking voices)"><option value="" ${!g ? 'selected' : ''}>?</option><option value="f" ${g === 'f' ? 'selected' : ''}>♀</option><option value="m" ${g === 'm' ? 'selected' : ''}>♂</option></select>`;
+  const rows = [];
+  rows.push(`<div class="crow fixed"><div class="cn">Narrator<span>everything outside quotes</span></div><div></div><div class="small">${esc(M.voice.name)}</div><button class="play" data-k="__narr">▶</button></div>`);
+  if (mode === 'quotes') {
+    rows.push(`<div class="crow"><div class="cn">Quoted speech<span>${d.quotes.toLocaleString()} lines</span></div><div></div><select class="cv" data-k="__quote">${opt(M.cast.quote)}</select><button class="play" data-k="__quote">▶</button></div>`);
+  } else {
+    for (const c of shownCharacters()) {
+      const g = M.cast.gender[c.name] ?? c.gender;
+      rows.push(`<div class="crow"><div class="cn" title="${esc(c.name)}">${esc(c.name)}<span>${c.lines} line${c.lines === 1 ? '' : 's'}</span></div>${gSel(c.name, g)}<select class="cv" data-k="${esc(c.name)}">${opt(M.cast.chars[c.name])}</select><button class="play" data-k="${esc(c.name)}">▶</button></div>`);
+    }
+    const hidden = d.characters.length - shownCharacters().length;
+    const others = d.unknown + d.characters.filter((c) => !shownCharacters().includes(c)).reduce((a, c) => a + c.lines, 0);
+    if (others > 0) rows.push(`<div class="crow"><div class="cn">Everyone else<span>${others.toLocaleString()} lines (unknown or minor speakers)</span></div><div></div><select class="cv" data-k="__quote">${opt(M.cast.quote)}</select><button class="play" data-k="__quote">▶</button></div>`);
+    $('#castMore').hidden = hidden <= 0 && !castShowAll;
+    $('#castMore').textContent = castShowAll ? 'Show main characters only' : `Show ${hidden} more minor character${hidden === 1 ? '' : 's'}`;
+  }
+  if (mode === 'quotes') $('#castMore').hidden = true;
+  $('#castRows').innerHTML = rows.join('');
+  $('#castNote').textContent = mode === 'cast'
+    ? 'Speakers are found from lines like “…,” said Mara and from who is talking back and forth, so a few lines may go to the wrong person. Lines nobody could be matched to use the “Everyone else” voice.' + (M.voice.eng === 'piper' ? ' Piper loads each voice separately, so books with many voices take a bit longer.' : '')
+    : 'Everything inside quotation marks is read by this voice. The narrator reads the rest, including “she said”.';
+  $('#castRows').querySelectorAll('select.cv').forEach((sel) => {
+    sel.onchange = () => {
+      const k = sel.dataset.k; const val = sel.value === 'narr' ? 'narr' : pool[+sel.value];
+      if (k === '__quote') M.cast.quote = val; else M.cast.chars[k] = val;
+      saveCast(); updateSummary();
+    };
+  });
+  $('#castRows').querySelectorAll('select.cg').forEach((sel) => { sel.onchange = () => { M.cast.gender[sel.dataset.n] = sel.value; saveCast(); }; });
+  $('#castRows').querySelectorAll('button.play').forEach((b) => { b.onclick = () => playCastSample(b.dataset.k, b); });
+  updateSummary();
+}
+$('#dlgMode').onchange = () => renderCast();
+$('#castAuto').onclick = async () => { await autoCast(true); renderCast(); };
+$('#castMore').onclick = () => { castShowAll = !castShowAll; renderCast(); };
+
+/** The voice for a chunk's speaker key: null = narrator, '*' = other speech, or a character's name. */
+function voiceFor(who) {
+  const n = M.voice; const mode = dlgMode();
+  if (who === null || mode === 'one' || !M.dlg) return n;
+  const pick = (v) => (!v || v === 'narr' ? n : v);
+  if (mode === 'quotes') return pick(M.cast.quote);
+  const shown = shownCharacters();
+  if (who !== '*' && shown.some((c) => c.name === who)) return pick(M.cast.chars[who]);
+  return pick(M.cast.quote);
+}
+function castVoiceCount() {
+  if (!M.voice || dlgMode() === 'one' || !M.dlg || !M.dlg.quotes) return 1;
+  const set = new Set([JSON.stringify([M.voice.eng, M.voice.id])]);
+  const add = (v) => set.add(JSON.stringify(v && v !== 'narr' ? [v.eng, v.id] : [M.voice.eng, M.voice.id]));
+  const others = M.dlg.unknown + M.dlg.characters.filter((c) => !shownCharacters().includes(c)).reduce((a, c) => a + c.lines, 0);
+  if (dlgMode() === 'quotes' || others > 0) add(M.cast.quote);
+  if (dlgMode() === 'cast') for (const c of shownCharacters()) add(M.cast.chars[c.name]);
+  return set.size;
+}
+
+async function playCastSample(k, btn) {
+  const player = $('#player');
+  let v, text;
+  if (k === '__narr') { v = M.voice; text = $('#sampleText').value.trim(); }
+  else if (k === '__quote') { v = voiceFor('*'); text = M.dlg.unknownSample || M.dlg.characters[0]?.sample; }
+  else { v = voiceFor(k); text = M.dlg.characters.find((c) => c.name === k)?.sample; }
+  text = (text || 'Hello there. This is how I would sound.').trim();
+  btn.classList.add('busy'); btn.textContent = '…';
+  try {
+    const pcm = await synth(v, text, speed());
+    player.src = URL.createObjectURL(new Blob([Formats.wav(polish(pcm), RATE)], { type: 'audio/wav' }));
+    await player.play();
+  } catch (e) { toast('Couldn\'t play that: ' + e.message, 7000); }
+  finally { btn.classList.remove('busy'); btn.textContent = '▶'; }
+}
+
+/** The stretch of the book with the most back-and-forth, for "Hear a conversation". */
+function liveliestScene() {
+  let best = null;
+  M.book.chapters.forEach((c, ci) => {
+    if (!c.segs) return;
+    for (let i = 0; i < c.segs.length; i++) {
+      const who = new Set(); let q = 0; let len = 0; let j = i;
+      for (; j < c.segs.length && len < 1100; j++) {
+        for (const s of c.segs[j]) { if (s.who !== null) { who.add(s.who); q++; } len += s.t.length; }
+      }
+      const score = who.size * 10 + q - (who.has('*') ? 5 : 0);
+      if (!best || score > best.score) best = { score, ci, from: i, to: j };
+    }
+  });
+  if (!best) return null;
+  const c = M.book.chapters[best.ci];
+  return { ...c, title: c.title, paras: c.paras.slice(best.from, best.to), segs: c.segs.slice(best.from, best.to), i: best.ci, on: true };
+}
+$('#convoBtn').onclick = () => {
+  const scene = liveliestScene();
+  if (!scene) { toast('No conversation was found.'); return; }
+  make({ preview: true, scene });
+};
+
+// ---------- sound: even loudness, room tone, chapter music ----------
+const TARGET_RMS = 0.075;   // about -22 dBFS of speech, a common audiobook level
+function polish(pcm) {
+  if (!$('#normalize').checked) return pcm;
+  let sum = 0, n = 0;
+  for (let i = 0; i < pcm.length; i++) { const x = pcm[i]; if (x > 0.01 || x < -0.01) { sum += x * x; n++; } }
+  if (n < 200) return pcm;
+  const g = Math.max(0.3, Math.min(4, TARGET_RMS / Math.sqrt(sum / n)));
+  const out = new Float32Array(pcm.length);
+  for (let i = 0; i < pcm.length; i++) {
+    let y = pcm[i] * g;
+    if (y > 0.85) y = 0.85 + 0.15 * Math.tanh((y - 0.85) / 0.15); else if (y < -0.85) y = -0.85 - 0.15 * Math.tanh((-y - 0.85) / 0.15);
+    out[i] = y;
+  }
+  return out;
+}
+/** Very quiet pink noise mixed under everything, so pauses aren't digital silence. */
+function makeRoomTone() {
+  let b0 = 0, b1 = 0, b2 = 0;
+  return (pcm) => {
+    const out = new Float32Array(pcm.length);
+    for (let i = 0; i < pcm.length; i++) {
+      const w = Math.random() * 2 - 1;
+      b0 = 0.99765 * b0 + w * 0.099046; b1 = 0.963 * b1 + w * 0.2965164; b2 = 0.57 * b2 + w * 1.0526913;
+      out[i] = pcm[i] + (b0 + b1 + b2 + w * 0.1848) * 0.0006;
+    }
+    return out;
+  };
+}
+const stingCache = new Map();
+/** A short original music cue for chapter breaks, made with a few synthesized notes. */
+async function makeSting(kind) {
+  if (kind === 'none') return null;
+  if (stingCache.has(kind)) return stingCache.get(kind);
+  const dur = kind === 'pad' ? 4.2 : 3.4;
+  const ctx = new OfflineAudioContext(1, Math.round(dur * RATE), RATE);
+  const master = ctx.createGain(); master.gain.value = 0.22; master.connect(ctx.destination);
+  const note = (f, t, len, type, peak, attack) => {
+    const o = ctx.createOscillator(); o.type = type; o.frequency.value = f;
+    const g = ctx.createGain(); g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(peak, t + attack);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + len);
+    o.connect(g); g.connect(master); o.start(t); o.stop(t + len + 0.05);
+  };
+  const hz = (m) => 440 * Math.pow(2, (m - 69) / 12);
+  if (kind === 'chime') {
+    [72, 76, 79, 84].forEach((m, i) => { note(hz(m), 0.05 + i * 0.32, 2.6, 'sine', 0.5, 0.01); note(hz(m) * 2.76, 0.05 + i * 0.32, 0.8, 'sine', 0.08, 0.005); });
+  } else if (kind === 'piano') {
+    [[60, 0], [67, 0.45], [64, 0.9], [72, 1.35]].forEach(([m, t]) => { note(hz(m), 0.05 + t, 2.2, 'triangle', 0.5, 0.008); note(hz(m) * 2, 0.05 + t, 1.2, 'sine', 0.12, 0.008); });
+  } else {
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 900; lp.connect(master);
+    for (const m of [48, 55, 60, 64, 67]) for (const det of [-6, 6]) {
+      const o = ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.value = hz(m); o.detune.value = det;
+      const g = ctx.createGain(); g.gain.setValueAtTime(0, 0); g.gain.linearRampToValueAtTime(0.05, 1.4); g.gain.setValueAtTime(0.05, 2.4); g.gain.linearRampToValueAtTime(0, dur - 0.05);
+      o.connect(g); g.connect(lp); o.start(0); o.stop(dur);
+    }
+  }
+  const buf = await ctx.startRendering();
+  const pcm = buf.getChannelData(0).slice();
+  stingCache.set(kind, pcm);
+  return pcm;
+}
+$('#stingPlay').onclick = async () => {
+  const k = $('#sting').value; if (k === 'none') { toast('Pick a music cue first.'); return; }
+  const pcm = await makeSting(k);
+  const p = $('#player'); p.src = URL.createObjectURL(new Blob([Formats.wav(pcm, RATE)], { type: 'audio/wav' })); p.play().catch(() => {});
+};
+
 // =====================================================================
 // 3. Export options
 // =====================================================================
@@ -759,6 +1009,7 @@ function updateSummary() {
   const files = one ? 1 : ch.length;
   const label = { m4b: 'M4B', mp3: 'MP3', wav: 'WAV' }[f];
   let s = `<b>${ch.length}</b> of ${M.book.chapters.length} chapters · about <b>${fmtDur(secs)}</b> of audio · <b>${files}</b> ${label} file${files === 1 ? '' : 's'} · roughly ${fmtMB(bytes)}`;
+  if (M.voice && castVoiceCount() > 1) s += ` · <b>${castVoiceCount()}</b> voices`;
   if (!M.voice) s += ' · <span>choose a voice in step 2</span>';
   else if (M.voice.eng === 'cloud') s += ` · ${chars.toLocaleString()} characters will be sent to ${esc(CLOUD[M.voice.provider].name)} (check their pricing)`;
   else if (M.voice.eng === 'kokoro') s += ' · Kokoro takes roughly as long as the audio on a laptop, much less with the Fast engine';
@@ -768,28 +1019,44 @@ function updateSummary() {
 // =====================================================================
 // 4. Making the audiobook
 // =====================================================================
-function textChunks(paras, max, skipRefs) {
+const vkey = (who) => { const v = voiceFor(who); return v ? `${v.eng}|${v.provider || ''}|${v.id}` : ''; };
+/** Splits a chapter into chunks small enough for the voice, each tagged with who speaks it. */
+function textChunks(c, max, skipRefs, skipFirst) {
   const out = [];
-  for (let p of paras) {
-    if (skipRefs) p = p.replace(/\[(\d{1,3}|[*†‡])\]/g, '').replace(/https?:\/\/\S+/g, '').replace(/\s{2,}/g, ' ').trim();
-    if (!p || !/[\p{L}\p{N}]/u.test(p)) continue;
-    const sentences = p.match(/[^.!?…]+(?:[.!?…]+["”’»)\]]*|$)\s*/g) || [p];
-    let cur = '';
-    const push = (t, end) => { t = t.trim(); if (t) out.push({ t, end }); };
-    for (let s of sentences) {
-      while (s.length > max) {
-        let cut = s.lastIndexOf(', ', max); if (cut < max * 0.4) cut = s.lastIndexOf(' ', max); if (cut < 1) cut = max;
-        if (cur) { push(cur, false); cur = ''; }
-        push(s.slice(0, cut + 1), false); s = s.slice(cut + 1);
-      }
-      if ((cur + s).length > max && cur) { push(cur, false); cur = ''; }
-      cur += s;
+  const multi = dlgMode() !== 'one' && c.segs && M.dlg && M.dlg.quotes;
+  c.paras.forEach((p0, i) => {
+    if (skipFirst && i === 0) return;
+    const segs = multi && c.segs[i] ? c.segs[i] : [{ t: p0, who: null }];
+    const groups = [];
+    for (const sg of segs) {
+      let t = sg.t;
+      if (skipRefs) t = t.replace(/\[(\d{1,3}|[*†‡])\]/g, '').replace(/https?:\/\/\S+/g, '');
+      t = t.replace(/\s{2,}/g, ' ').trim();
+      if (sg.who === null && multi) t = t.replace(/^[\s,;:—–-]+/, '');
+      if (!t || !/[\p{L}\p{N}]/u.test(t)) continue;
+      const k = vkey(sg.who);
+      const last = groups[groups.length - 1];
+      if (last && last.k === k) last.t += ' ' + t; else groups.push({ k, who: sg.who, t });
     }
-    push(cur, true);
-  }
+    groups.forEach((g, gi) => {
+      const sentences = g.t.match(/[^.!?…]+(?:[.!?…]+["”’»)\]]*|$)\s*/g) || [g.t];
+      let cur = '';
+      const push = (t, end) => { t = t.trim(); if (t) out.push({ t, end, who: g.who }); };
+      for (let x of sentences) {
+        while (x.length > max) {
+          let cut = x.lastIndexOf(', ', max); if (cut < max * 0.4) cut = x.lastIndexOf(' ', max); if (cut < 1) cut = max;
+          if (cur) { push(cur, false); cur = ''; }
+          push(x.slice(0, cut + 1), false); x = x.slice(cut + 1);
+        }
+        if ((cur + x).length > max && cur) { push(cur, false); cur = ''; }
+        cur += x;
+      }
+      push(cur, gi === groups.length - 1);
+    });
+  });
   return out;
 }
-const maxChars = (v) => (v.eng === 'cloud' ? CLOUD[v.provider].max : v.eng === 'piper' ? 600 : 320);
+const maxChars = (v) => (v.eng === 'cloud' ? (CLOUD[v.provider] || { max: 2500 }).max : v.eng === 'piper' ? 600 : 320);
 
 /** Encoders: feed Float32 PCM at RATE, get a Blob at the end. */
 let mp3Worker = null;
@@ -885,16 +1152,17 @@ function addResult(name, blob, note) {
   $('#results').appendChild(el);
 }
 
-async function make(preview) {
+async function make(o = {}) {
   if (M.making || !M.book || !M.voice) return;
+  const preview = !!o.preview; const scene = o.scene || null;
   const v = M.voice; const b = M.book;
   const f = preview ? 'mp3' : fmt();
   const perChapter = !preview && (f === 'wav' || $('#split').value === 'chapters');
   const kbps = +$('#kbps').value;
   const sp = speedSupported(v) ? speed() : 1;
   const chPause = +$('#chapPause').value, paraPause = +$('#paraPause').value;
-  const opt = { intro: $('#intro').checked, announce: $('#announce').checked, skipRefs: $('#skipRefs').checked, tags: $('#tags').checked };
-  const chapters = preview ? selectedChapters().slice(0, 1) : selectedChapters();
+  const opt = { intro: !scene && $('#intro').checked, announce: !scene && $('#announce').checked, skipRefs: $('#skipRefs').checked, tags: $('#tags').checked };
+  const chapters = scene ? [scene] : preview ? selectedChapters().slice(0, 1) : selectedChapters();
   const ext = { m4b: 'm4b', mp3: 'mp3', wav: 'wav' }[f];
   const base = safeName(b.title);
   const width = String(chapters.length).length < 2 ? 2 : String(chapters.length).length;
@@ -920,18 +1188,31 @@ async function make(preview) {
   document.addEventListener('visibilitychange', reWake);
 
   // plan all the text first so progress and ETA are honest
-  const max = maxChars(v);
+  const max = Math.min(...[v, ...(dlgMode() === 'one' ? [] : [...Object.values(M.cast.chars), M.cast.quote])].filter((x) => x && x !== 'narr').map(maxChars));
   const plan = chapters.map((c, k) => {
-    let paras = c.paras;
-    if (opt.announce && paras.length && paras[0].trim().toLowerCase() === c.title.trim().toLowerCase()) paras = paras.slice(1);
-    let chunks = textChunks(paras, max, opt.skipRefs);
-    if (preview) { let n = 0; chunks = chunks.filter((x) => (n += x.t.length) < 950 || n - x.t.length === 0); }
+    const skipFirst = opt.announce && c.paras.length && c.paras[0].trim().toLowerCase() === c.title.trim().toLowerCase();
+    let chunks = textChunks(c, max, opt.skipRefs, skipFirst);
+    if (preview) { const lim = scene ? 1300 : 950; let n = 0; chunks = chunks.filter((x) => (n += x.t.length) < lim || n - x.t.length === 0); }
     return { c, k, chunks, chars: chunks.reduce((a, x) => a + x.t.length, 0) };
   });
   const totalChars = plan.reduce((a, p) => a + (skip.has(p.k) ? 0 : p.chars), 0) || 1;
   let doneChars = 0; const t0 = performance.now();
   const meta = (title, extra) => (opt.tags ? { title, artist: b.author, album: b.title, cover: b.cover?.data ? b.cover : null, ...extra } : null);
-  const say = async (enc, text) => { const pcm = trim(await synth(v, text, sp)); await enc.add(pcm); };
+  const tone = $('#roomTone').checked ? makeRoomTone() : null;
+  const put = (pcm) => enc.add(tone ? tone(pcm) : pcm);
+  const say = async (text) => { await put(polish(trim(await synth(v, text, sp)))); };
+  const sting = preview ? null : await makeSting($('#sting').value).catch(() => null);
+  const render = async (ch) => {
+    const voice = voiceFor(ch.who);
+    for (let attempt = 0; ; attempt++) {
+      try { return polish(trim(await synth(voice, ch.t, sp))); }
+      catch (e) {
+        if (M.cancel) return null;
+        if (attempt >= 2 || /key was rejected|quota/i.test(e.message)) throw e;
+        await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
+      }
+    }
+  };
   const progress = (label) => {
     const frac = doneChars / totalChars;
     $('#barFill').style.width = (frac * 100).toFixed(1) + '%';
@@ -951,29 +1232,36 @@ async function make(preview) {
       chapterStatus(p.c.i, '⏳');
       if (perChapter) enc = await makeEncoder(f, kbps);
       else chapterMarks.push({ title: p.c.title, startMs: enc.samples / RATE * 1000 });
-      if (opt.intro && (perChapter ? true : p === plan[0]) && p.k === 0) {
-        await say(enc, `${b.title}${b.author ? '. By ' + b.author : ''}.`); await enc.add(silence(chPause));
+      if (opt.intro && p.k === 0) {
+        await say(`${b.title}${b.author ? '. By ' + b.author : ''}.`); await put(silence(chPause));
       }
-      if (opt.announce) { progress(`${p.c.title}: title`); await say(enc, p.c.title.replace(/\s+/g, ' ') + '.'); await enc.add(silence(Math.min(1.2, chPause * 0.6))); }
+      if (sting) { await put(sting); await put(silence(0.5)); }
+      if (opt.announce) { progress(`${p.c.title}: title`); await say(p.c.title.replace(/\s+/g, ' ') + '.'); await put(silence(Math.min(1.2, chPause * 0.6))); }
+      // Piper loads one voice at a time, so with several voices it makes each voice's lines together, then puts them in order
+      const label = (j) => `${p.c.title}: ${Math.round((j / Math.max(1, p.chunks.length)) * 100)}%`;
+      let pre = null;
+      if (p.chunks.some((ch) => voiceFor(ch.who).eng === 'piper') && new Set(p.chunks.map((ch) => vkey(ch.who))).size > 1) {
+        pre = new Array(p.chunks.length);
+        const order = p.chunks.map((ch, j) => j).sort((a, c) => vkey(p.chunks[a].who).localeCompare(vkey(p.chunks[c].who)) || a - c);
+        for (const [n, j] of order.entries()) {
+          if (M.cancel) break;
+          progress(label(n));
+          pre[j] = await render(p.chunks[j]);
+          doneChars += p.chunks[j].t.length;
+        }
+      }
       for (const [j, ch] of p.chunks.entries()) {
         if (M.cancel) break;
-        progress(`${p.c.title}: ${Math.round((j / Math.max(1, p.chunks.length)) * 100)}%`);
         let pcm;
-        for (let attempt = 0; ; attempt++) {
-          try { pcm = await synth(v, ch.t, sp); break; }
-          catch (e) {
-            if (M.cancel) break;
-            if (attempt >= 2 || /key was rejected|quota/i.test(e.message)) throw e;
-            await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
-          }
-        }
-        if (M.cancel) break;
-        await enc.add(trim(pcm));
-        await enc.add(silence(ch.end ? paraPause : 0.12));
-        doneChars += ch.t.length;
+        if (pre) pcm = pre[j];
+        else { progress(label(j)); pcm = await render(ch); doneChars += ch.t.length; }
+        if (M.cancel || !pcm) break;
+        await put(pcm);
+        const next = p.chunks[j + 1];
+        await put(silence(ch.end ? paraPause : next && vkey(next.who) !== vkey(ch.who) ? 0.22 : 0.12));
       }
       if (M.cancel) break;
-      await enc.add(silence(chPause));
+      await put(silence(chPause));
       if (perChapter) {
         const name = nameFor(p.c, p.k);
         const blob = await enc.finish(meta(p.c.title, { track: `${p.k + 1}/${plan.length}` }));
@@ -986,7 +1274,7 @@ async function make(preview) {
     }
     if (!M.cancel && !perChapter) {
       progress('Finishing the file…');
-      const name = preview ? `${base} (preview).mp3` : `${base}.${ext}`;
+      const name = scene ? `${base} (conversation preview).mp3` : preview ? `${base} (preview).mp3` : `${base}.${ext}`;
       const ends = chapterMarks.map((c, i) => ({ ...c, endMs: i + 1 < chapterMarks.length ? chapterMarks[i + 1].startMs : enc.samples / RATE * 1000 }));
       const blob = await enc.finish(meta(b.title, { chapters: preview ? [] : ends }));
       enc = null;
@@ -1019,8 +1307,8 @@ async function make(preview) {
     try { await wake?.release(); } catch (_) {}
   }
 }
-$('#makeBtn').onclick = () => make(false);
-$('#previewBtn').onclick = () => make(true);
+$('#makeBtn').onclick = () => make();
+$('#previewBtn').onclick = () => make({ preview: true });
 $('#cancelBtn').onclick = () => {
   M.cancel = true; $('#progText').textContent = 'Stopping after this sentence…';
   K.gen++; if (K.worker) K.worker.postMessage({ type: 'flush', gen: K.gen });
@@ -1041,6 +1329,12 @@ addEventListener('beforeunload', (e) => { if (M.making) { e.preventDefault(); e.
   if (PREF.cloudProv) $('#cloudProv').value = PREF.cloudProv;
   if (PREF.openaiStyle) $('#openaiStyle').value = PREF.openaiStyle;
   if (PREF.voice) M.voice = PREF.voice;
+  if (PREF.dlgMode) $('#dlgMode').value = PREF.dlgMode;
+  for (const k of ['normalize', 'roomTone']) if (typeof PREF[k] === 'boolean') $('#' + k).checked = PREF[k];
+  if (PREF.sting) $('#sting').value = PREF.sting;
+  ['#normalize', '#roomTone'].forEach((x) => { $(x).onchange = () => { PREF[x.slice(1)] = $(x).checked; savePref(); M.samples.clear(); }; });
+  $('#sting').onchange = () => { PREF.sting = $('#sting').value; savePref(); };
+  renderCast();
   $('#sampleText').value = 'It was a bright, cold morning, and the harbor was just waking up. Somewhere a gull called twice, then went quiet.';
   cloudUI();
   setEngine(PREF.eng || 'kokoro');

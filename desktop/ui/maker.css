@@ -126,3 +126,17 @@ footer { margin-top: 26px; text-align: center; line-height: 1.7; }
   .cover { width: 90px; height: 130px; }
   .card { padding: 14px; }
 }
+
+.dialog { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+.cast { display: grid; gap: 6px; margin-top: 10px; max-height: 420px; overflow: auto; }
+.crow { display: grid; grid-template-columns: minmax(120px, 1.2fr) 80px minmax(160px, 2fr) 40px; gap: 8px; align-items: center; padding: 6px 8px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel2); }
+.crow .cn { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.crow .cn span { display: block; font-weight: 400; font-size: 12px; color: var(--muted); }
+.crow select { padding: 5px 6px; }
+.crow .play { width: 36px; height: 36px; border-radius: 50%; padding: 0; }
+.crow .play.busy { animation: pulse 1s infinite; }
+.crow.fixed { background: transparent; }
+.sound { margin: 6px 0 14px; padding: 12px 0 0; border-top: 1px solid var(--line); }
+.sound .checks { margin: 8px 0 4px; }
+button.icon { width: 36px; height: 36px; border-radius: 50%; padding: 0; }
+@media (max-width: 640px) { .crow { grid-template-columns: 1fr 70px; } .crow select.cv { grid-column: 1 / 2; } }
