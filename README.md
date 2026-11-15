@@ -6,11 +6,26 @@ An Android ebook reader that finds free, legal books and **reads them aloud** wi
 
 ## Install
 
+### Android
 1. On your phone, open the **[latest release](../../releases/latest)** and download **`ShelfReader.apk`**.
 2. Open the file. If Android asks, allow installs from your browser or file manager.
 3. Done. After that, the app can update itself (see [Updates](#updates)).
 
 > Requires Android 8.0 or newer.
+
+### Windows
+1. Open the **[latest release](../../releases/latest)** on your PC.
+2. Download **`ShelfReader-Setup.exe`** to install it, or **`ShelfReader-Portable.exe`** to run it without installing.
+3. Windows may show *“Windows protected your PC”* because the app isn't code-signed. Click **More info → Run anyway**.
+
+The desktop app has the same library, cover shelf, search, reader, chapters, bookmarks and notes, collections, sleep timer, pronunciation fixes and themes. Extras on PC:
+- **Open in Edge:** opens your library in Microsoft Edge, which offers very natural “Online (Natural)” voices (marked ★). Keep the app running while you listen in Edge.
+- **Bring your phone library over:** on the phone use *Menu → Back up library*, copy the `.zip` to your PC, and drop it on the app window (or *Settings → Restore from backup*). Books, places, notes and collections come across.
+- **Keyboard:** <kbd>Space</kbd> play/pause, <kbd>←</kbd>/<kbd>→</kbd> paragraph, <kbd>Shift</kbd>+<kbd>←</kbd>/<kbd>→</kbd> chapter, <kbd>B</kbd> bookmark, <kbd>C</kbd> chapters, <kbd>Ctrl</kbd>+<kbd>F</kbd> search. Media keys work too.
+- **Drag and drop** EPUB, PDF or TXT files onto the window to add them.
+- Select a word to **define** it. Right-click a paragraph for bookmarks and notes.
+
+Audio export and Android Auto are phone-only.
 
 ---
 
@@ -89,6 +104,10 @@ Inside the app, **Menu → Check for updates** (it also checks on its own every 
 ---
 
 ## Building it yourself
+
+**Desktop:** in `desktop/`, run `npm install`, then `npm start` to try it or `npm run dist` to build the Windows installers. You can also run just the library server with `node server.js` and open http://127.0.0.1:47321 in any browser.
+
+**Android:**
 
 GitHub Actions builds every push (see `.github/workflows/build.yml`). To build locally you need JDK 17 and the Android SDK:
 

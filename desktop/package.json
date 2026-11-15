@@ -1,0 +1,53 @@
+{
+  "name": "shelf-reader",
+  "productName": "Shelf Reader",
+  "version": "1.0.0",
+  "description": "Find free ebooks and listen to them read aloud",
+  "main": "main.js",
+  "author": "Shelf Reader",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "serve": "node server.js",
+    "dist": "electron-builder --win nsis portable --publish never"
+  },
+  "dependencies": {
+    "adm-zip": "^0.5.18",
+    "pdf-parse": "^1.1.4"
+  },
+  "devDependencies": {
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.shelfreader.desktop",
+    "productName": "Shelf Reader",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "server.js",
+      "lib/**",
+      "ui/**",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "artifactName": "ShelfReader-Setup.${ext}"
+    },
+    "portable": {
+      "artifactName": "ShelfReader-Portable.${ext}"
+    }
+  }
+}

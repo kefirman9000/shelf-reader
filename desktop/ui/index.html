@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Shelf Reader</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="theme-0">
+  <header id="top">
+    <div class="brand"><span class="logo"></span>Shelf Reader</div>
+    <nav>
+      <button class="tab active" data-view="library">Library</button>
+      <button class="tab" data-view="search">Find books</button>
+    </nav>
+    <div class="spacer"></div>
+    <button id="importBtn" title="Open EPUB, PDF or TXT files (or drop them on the window)">Import</button>
+    <button id="edgeBtn" title="Open this library in Microsoft Edge to use its natural voices" hidden>Open in Edge</button>
+    <button id="settingsBtn" class="icon" title="Settings">⚙</button>
+    <input type="file" id="fileInput" accept=".epub,.pdf,.txt" multiple hidden>
+    <input type="file" id="coverInput" accept="image/*" hidden>
+    <input type="file" id="restoreInput" accept=".zip" hidden>
+  </header>
+
+  <main>
+    <section id="library" class="view">
+      <div id="continue" class="continue" hidden>
+        <div id="contCover" class="cont-cover"></div>
+        <div class="ct">
+          <div class="label">Continue</div>
+          <div id="contTitle" class="ct-title"></div>
+          <div id="contSub" class="muted"></div>
+        </div>
+        <button id="contOpen">Open</button>
+        <button id="contPlay" class="primary">▶ Listen</button>
+      </div>
+      <div class="toolbar">
+        <select id="filterSel" title="Show"></select>
+        <div class="spacer"></div>
+        <label class="muted">View</label>
+        <select id="viewSel"><option value="0">Shelf</option><option value="1">Grid</option><option value="2">List</option></select>
+        <label class="muted">Sort</label>
+        <select id="sortSel"><option value="0">Recent</option><option value="1">Title</option><option value="2">Author</option><option value="3">Progress</option></select>
+      </div>
+      <div id="shelf"></div>
+      <div id="libEmpty" class="empty" hidden></div>
+    </section>
+
+    <section id="search" class="view" hidden>
+      <form id="searchForm">
+        <input id="q" placeholder="Search by title or author" autocomplete="off">
+        <button class="primary">Search</button>
+      </form>
+      <div id="searchStatus" class="muted">Searches free, legal sources: Project Gutenberg, Standard Ebooks, the Internet Archive (public-domain and open-access books), Open Library, Wikisource and Feedbooks.</div>
+      <div id="results"></div>
+    </section>
+
+    <section id="reader" class="view" hidden>
+      <div class="rbar">
+        <button id="backBtn">← Library</button>
+        <div class="rtitle"><div id="rTitle"></div><div id="rChap" class="muted"></div></div>
+        <button id="chapBtn" title="Chapters (C)">Chapters</button>
+        <button id="findBtn" title="Search in book (Ctrl+F)">Search</button>
+        <button id="notesBtn" title="Bookmarks &amp; notes">Bookmarks</button>
+      </div>
+      <div id="textWrap"><div id="text"></div></div>
+    </section>
+  </main>
+
+  <footer id="player" hidden>
+    <input type="range" id="seek" min="0" max="100" value="0" title="Jump to a point in the book">
+    <div class="prow">
+      <div id="pCover" class="p-cover"></div>
+      <div id="pInfo"><div id="pTitle"></div><div id="pStatus" class="muted"></div></div>
+      <div class="pctl">
+        <button id="pChapPrev" title="Previous chapter (Shift+←)">⏮</button>
+        <button id="pPrev" title="Previous paragraph (←)">◀</button>
+        <button id="pPlay" class="primary big" title="Play / pause (Space)">▶</button>
+        <button id="pNext" title="Next paragraph (→)">▶</button>
+        <button id="pChapNext" title="Next chapter (Shift+→)">⏭</button>
+      </div>
+      <div class="popts">
+        <select id="rateSel" title="Speed for this book"></select>
+        <select id="voiceSel" title="Voice for this book"></select>
+        <select id="sleepSel" title="Sleep timer">
+          <option value="0">Sleep: off</option><option value="5">5 min</option><option value="15">15 min</option>
+          <option value="30">30 min</option><option value="45">45 min</option><option value="60">1 hour</option>
+          <option value="-1">End of chapter</option>
+        </select>
+      </div>
+    </div>
+  </footer>
+
+  <aside id="drawer" hidden>
+    <div class="dhead"><div id="drawerTitle"></div><button id="drawerClose" class="icon">✕</button></div>
+    <div id="drawerBody"></div>
+  </aside>
+
+  <div id="modal" hidden><div class="box"><div id="modalBody"></div><div id="modalActions" class="actions"></div></div></div>
+  <div id="menu" hidden></div>
+  <button id="defineBubble" hidden></button>
+  <div id="toast" hidden></div>
+  <div id="dropHint" hidden>Drop EPUB, PDF or TXT files to add them</div>
+  <audio id="keepAlive" loop></audio>
+  <script src="app.js"></script>
+</body>
+</html>
