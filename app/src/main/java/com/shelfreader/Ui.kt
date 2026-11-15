@@ -102,3 +102,69 @@ private fun Activity.addPronunciation(onChanged: () -> Unit) {
         .setNegativeButton("Cancel", null)
         .show()
 }
+
+/** Tick the collections a book belongs to; "New collection…" adds one. */
+fun editCollections(act: Activity, bookId: String, onDone: () -> Unit) {
+    val names = Collections.names(act)
+    val current = Collections.of(act, bookId)
+    val checked = BooleanArray(names.size) { names[it] in current }
+    AlertDialog.Builder(act)
+        .setTitle("Collections")
+        .setMultiChoiceItems(names.toTypedArray(), checked) { _, w, isChecked -> checked[w] = isChecked }
+        .setPositiveButton("Save") { _, _ ->
+            Collections.set(act, bookId, names.filterIndexed { i, _ -> checked[i] }.toSet())
+            onDone()
+        }
+        .setNeutralButton("New collection…") { _, _ ->
+            val box = EditText(act).apply { hint = "Collection name"; isSingleLine = true }
+            val wrap = LinearLayout(act).apply {
+                setPadding(act.dp(20), act.dp(8), act.dp(20), 0)
+                addView(box, LinearLayout.LayoutParams(MATCH, WRAP))
+            }
+            AlertDialog.Builder(act)
+                .setTitle("New collection")
+                .setView(wrap)
+                .setPositiveButton("Create") { _, _ ->
+                    val n = box.text.toString().trim()
+                    if (n.isNotEmpty()) {
+                        Collections.create(act, n)
+                        Collections.add(act, bookId, n)
+                    }
+                    editCollections(act, bookId, onDone)
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+        }
+        .setNegativeButton("Cancel", null)
+        .show()
+}
+
+/** One-time guide to getting the best-sounding voice. */
+fun showVoiceGuide(act: Activity) {
+    Settings.setSeenVoiceGuide(act)
+    AlertDialog.Builder(act)
+        .setTitle("Get the best voice")
+        .setMessage(
+            "Shelf Reader uses your phone's text-to-speech voices. For the most natural sound:\n\n" +
+                "1. Install or update “Speech Services by Google”.\n" +
+                "2. Open voice settings and make it the preferred engine.\n" +
+                "3. Tap the ⚙ next to it → Install voice data → your language, and download a voice.\n" +
+                "4. In a book, open the menu → Voice and pick it.\n\n" +
+                "You can see this again from the main menu."
+        )
+        .setPositiveButton("Open voice settings") { _, _ ->
+            try { act.startActivity(android.content.Intent("com.android.settings.TTS_SETTINGS")) }
+            catch (e: Throwable) { act.toast("Open Settings → Accessibility → Text-to-speech") }
+        }
+        .setNeutralButton("Get Google voices") { _, _ ->
+            try {
+                act.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW,
+                    android.net.Uri.parse("market://details?id=com.google.android.tts")))
+            } catch (e: Throwable) {
+                act.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW,
+                    android.net.Uri.parse("https://play.google.com/store/apps/details?id=com.google.android.tts")))
+            }
+        }
+        .setNegativeButton("Later", null)
+        .show()
+}

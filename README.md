@@ -52,6 +52,17 @@ You can also **import** your own DRM-free **EPUB, PDF or TXT** files.
 - **Themes:** dark, light, sepia and black, with a choice of font, margins and text size.
 - Remembers your place in every book, down to the sentence.
 
+### Ease of use
+- **Book details before you download:** cover, description, year, length and popularity. Use **Download for later** to save a book to *Want to read*.
+- **Collections:** *Want to read*, *Finished* (books are added automatically when you finish them) and your own collections. Filter the library by any of them.
+- **Car mode:** a black screen with huge buttons, 30-second rewind and skip, and chapter jumps. The screen stays on.
+- **Gestures:** tap a paragraph to read from it, double-tap to play or pause, swipe sideways to skip a paragraph.
+- **Search inside a book**, and **look up any word** (long-press a paragraph → *Look up a word*, using the free dictionaryapi.dev).
+- **Per-book voice and speed:** each book remembers its own.
+- **Resume when headphones connect:** a paused book starts again when you plug in or connect Bluetooth headphones.
+- **First-run voice guide** for getting Google's best voice, also in the main menu.
+- **Backup and restore:** books, places, notes, collections and settings in one `.zip`, handy for a new phone.
+
 ### Extras
 - **Export as audio:** save a chapter or the whole book as `.m4a` audio files (one per chapter) to any folder.
 - **Home-screen widget** with play, pause and skip.
@@ -100,3 +111,5 @@ The app is plain Kotlin with the Android framework. Its only library is [pdfbox-
 | `ExportService.kt`, `Audio.kt` | Audio export (text-to-speech → AAC) |
 | `ShelfWidget.kt` | Home-screen widget |
 | `Updater.kt` | In-app updates from GitHub Releases |
+| `CarModeActivity.kt` | Big-button car mode |
+| `Backup.kt` | Backup and restore, dictionary lookups |

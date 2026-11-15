@@ -10,8 +10,12 @@ data class SearchResult(
     val url: String? = null,      // direct download (Gutenberg)
     val format: String? = null,   // epub / txt / pdf when url is set
     val iaId: String? = null,     // Internet Archive identifier, resolved at download time
-    val cover: String? = null     // cover image URL, if the source has one
+    val cover: String? = null,    // cover image URL, if the source has one
+    val description: String? = null,
+    val info: String? = null      // e.g. "1923 · 312 pages · 41,000 downloads"
 )
+
+private fun stripHtml(s: String) = Extract.decodeEntities(s.replace(Regex("<[^>]*>"), " ")).replace(Regex("\\s+"), " ").trim()
 
 /**
  * Free, legal sources only:
@@ -46,7 +50,15 @@ object Sources {
                 names += prettyName(authors.getJSONObject(a).optString("name"))
             }
             val cover = formats.optString("image/jpeg").ifEmpty { null }
-            out += SearchResult("Gutenberg", b.optString("title"), names.joinToString(", "), url, fmt, cover = cover)
+            val summary = b.optJSONArray("summaries")?.let { if (it.length() > 0) it.optString(0) else null }
+            val subjects = b.optJSONArray("subjects")?.let { a -> (0 until minOf(3, a.length())).map { a.optString(it) } } ?: emptyList()
+            val dl = b.optInt("download_count", 0)
+            val info = listOfNotNull(
+                if (dl > 0) "%,d downloads".format(dl) else null,
+                subjects.joinToString("; ").ifEmpty { null }
+            ).joinToString(" · ")
+            out += SearchResult("Gutenberg", b.optString("title"), names.joinToString(", "), url, fmt,
+                cover = cover, description = summary, info = info.ifEmpty { null })
         }
         return out
     }
@@ -56,7 +68,7 @@ object Sources {
         if (clean.isEmpty()) return emptyList()
         val query = "($clean) AND mediatype:(texts) AND NOT access-restricted-item:(true)"
         val url = "https://archive.org/advancedsearch.php?q=" + Net.enc(query) +
-            "&fl%5B%5D=identifier&fl%5B%5D=title&fl%5B%5D=creator&rows=40&output=json&sort%5B%5D=downloads+desc"
+            "&fl%5B%5D=identifier&fl%5B%5D=title&fl%5B%5D=creator&fl%5B%5D=description&fl%5B%5D=year&fl%5B%5D=downloads&rows=40&output=json&sort%5B%5D=downloads+desc"
         val j = JSONObject(Net.get(url))
         val docs = j.optJSONObject("response")?.optJSONArray("docs") ?: return emptyList()
         val out = ArrayList<SearchResult>()
@@ -64,15 +76,22 @@ object Sources {
             val d = docs.getJSONObject(i)
             val id = d.optString("identifier")
             if (id.isEmpty()) continue
+            val dl = d.optInt("downloads", 0)
+            val info = listOfNotNull(
+                strOrArr(d, "year").ifBlank { null },
+                if (dl > 0) "%,d downloads".format(dl) else null
+            ).joinToString(" · ")
             out += SearchResult("Internet Archive", strOrArr(d, "title").ifBlank { id }, strOrArr(d, "creator"), iaId = id,
-                cover = "https://archive.org/services/img/" + Net.encPath(id))
+                cover = "https://archive.org/services/img/" + Net.encPath(id),
+                description = stripHtml(strOrArr(d, "description")).take(1500).ifEmpty { null },
+                info = info.ifEmpty { null })
         }
         return out
     }
 
     fun openLibrary(q: String): List<SearchResult> {
         val url = "https://openlibrary.org/search.json?q=" + Net.enc(q) +
-            "&has_fulltext=true&ebook_access=public&fields=key,title,author_name,ia,ebook_access,cover_i&limit=40"
+            "&has_fulltext=true&ebook_access=public&fields=key,title,author_name,ia,ebook_access,cover_i,first_publish_year,number_of_pages_median,first_sentence,subject&limit=40"
         val j = JSONObject(Net.get(url))
         val docs = j.optJSONArray("docs") ?: return emptyList()
         val out = ArrayList<SearchResult>()
@@ -85,7 +104,17 @@ object Sources {
             val coverId = d.optLong("cover_i", 0L)
             val cover = if (coverId > 0) "https://covers.openlibrary.org/b/id/$coverId-L.jpg"
                 else "https://archive.org/services/img/" + Net.encPath(ia.getString(0))
-            out += SearchResult("Open Library", d.optString("title"), strOrArr(d, "author_name"), iaId = ia.getString(0), cover = cover)
+            val year = d.optInt("first_publish_year", 0)
+            val pages = d.optInt("number_of_pages_median", 0)
+            val subj = d.optJSONArray("subject")?.let { a -> (0 until minOf(3, a.length())).map { a.optString(it) } } ?: emptyList()
+            val info = listOfNotNull(
+                if (year > 0) "First published $year" else null,
+                if (pages > 0) "$pages pages" else null,
+                subj.joinToString("; ").ifEmpty { null }
+            ).joinToString(" · ")
+            val first = strOrArr(d, "first_sentence").ifBlank { null }?.let { "Opening line: $it" }
+            out += SearchResult("Open Library", d.optString("title"), strOrArr(d, "author_name"), iaId = ia.getString(0),
+                cover = cover, description = first, info = info.ifEmpty { null })
         }
         return out
     }
@@ -118,10 +147,14 @@ object Sources {
         val arr = j.optJSONObject("query")?.optJSONArray("search") ?: return emptyList()
         val out = ArrayList<SearchResult>()
         for (i in 0 until arr.length()) {
-            val title = arr.getJSONObject(i).optString("title")
+            val o = arr.getJSONObject(i)
+            val title = o.optString("title")
             if (title.isEmpty() || title.contains('/')) continue   // skip individual chapter pages
             val url = "https://ws-export.wmcloud.org/?format=epub-3&lang=en&page=" + Net.enc(title)
-            out += SearchResult("Wikisource", title, "", url, "epub")
+            val words = o.optInt("wordcount", 0)
+            out += SearchResult("Wikisource", title, "", url, "epub",
+                description = stripHtml(o.optString("snippet")).ifEmpty { null }?.let { "…$it…" },
+                info = if (words > 0) "%,d words".format(words) else null)
         }
         return out
     }
@@ -144,7 +177,10 @@ object Sources {
                 val open = rel == "http://opds-spec.org/acquisition" || rel == "http://opds-spec.org/acquisition/open-access"
                 if (open && type.contains("epub")) { url = Extract.decodeEntities(href); break }
             }
-            if (url != null) out += SearchResult("Feedbooks", title, author, url, "epub")
+            val summary = Regex("<(summary|content)[^>]*>(.*?)</\\1>", dotAll).find(e)?.groupValues?.get(2)?.let { stripHtml(Extract.decodeEntities(it)) }
+            val img = Regex("<link\\b[^>]*rel=\"http://opds-spec.org/image(/thumbnail)?\"[^>]*>", RegexOption.IGNORE_CASE).find(e)?.value
+                ?.let { Regex("href=\"([^\"]+)\"").find(it)?.groupValues?.get(1) }
+            if (url != null) out += SearchResult("Feedbooks", title, author, url, "epub", cover = img, description = summary)
         }
         return out
     }

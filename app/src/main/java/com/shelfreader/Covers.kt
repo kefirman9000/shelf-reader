@@ -115,6 +115,13 @@ object Covers {
         return BitmapFactory.decodeFile(f.path, BitmapFactory.Options().apply { inSampleSize = sample(o.outWidth, o.outHeight) })
     }
 
+    /** Downloads and decodes an image (for previews). Call off the main thread. */
+    fun fromUrl(url: String): Bitmap? = try {
+        val c = Net.open(url)
+        val bytes = try { c.inputStream.use { it.readBytes() } } finally { c.disconnect() }
+        decodeBytes(bytes)
+    } catch (t: Throwable) { null }
+
     private fun decodeBytes(b: ByteArray): Bitmap? {
         val o = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeByteArray(b, 0, b.size, o)

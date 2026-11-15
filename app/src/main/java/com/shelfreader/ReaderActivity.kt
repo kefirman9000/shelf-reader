@@ -12,7 +12,10 @@ import android.speech.tts.Voice
 import android.text.SpannableString
 import android.text.Spanned
 import android.text.style.BackgroundColorSpan
+import android.view.ActionMode
+import android.view.GestureDetector
 import android.view.Menu
+import android.view.MotionEvent
 import android.view.MenuItem
 import android.view.View
 import android.view.ViewGroup
@@ -22,6 +25,7 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ListView
+import android.widget.ScrollView
 import android.widget.TextView
 import java.util.Locale
 
@@ -111,7 +115,26 @@ class ReaderActivity : Activity() {
             isFastScrollEnabled = true
             adapter = this@ReaderActivity.adapter
         }
-        list.setOnItemClickListener { _, _, pos, _ -> playFrom(pos) }
+        // Tap a paragraph: read from there. Double-tap: play/pause. Swipe sideways: skip a paragraph.
+        val gestures = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
+            override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
+                val pos = list.pointToPosition(e.x.toInt(), e.y.toInt())
+                if (pos >= 0) playFrom(pos)
+                return true
+            }
+            override fun onDoubleTap(e: MotionEvent): Boolean { togglePlay(); return true }
+            override fun onFling(e1: MotionEvent?, e2: MotionEvent, velocityX: Float, velocityY: Float): Boolean {
+                val start = e1 ?: return false
+                val dx = e2.x - start.x
+                val dy = e2.y - start.y
+                if (kotlin.math.abs(dx) > dp(90) && kotlin.math.abs(dx) > kotlin.math.abs(dy) * 2) {
+                    step(if (dx < 0) 1 else -1)
+                    return true
+                }
+                return false
+            }
+        })
+        list.setOnTouchListener { _, ev -> gestures.onTouchEvent(ev); false }
         list.setOnItemLongClickListener { _, _, pos, _ -> paragraphMenu(pos); true }
         list.setOnScrollListener(object : AbsListView.OnScrollListener {
             override fun onScrollStateChanged(view: AbsListView?, scrollState: Int) {
@@ -222,7 +245,7 @@ class ReaderActivity : Activity() {
 
     private fun refreshButtons() {
         playBtn.text = if (isPlaying()) "❚❚ Pause" else "▶ Play"
-        speedBtn.text = fmtRate(Settings.rate(this))
+        speedBtn.text = fmtRate(Settings.rateFor(this, book.id))
     }
 
     private fun fmtRate(r: Float) = (if (r % 1f == 0f) r.toInt().toString() else r.toString()) + "×"
@@ -331,9 +354,9 @@ class ReaderActivity : Activity() {
     private fun pickSpeed() {
         val rates = floatArrayOf(0.75f, 1f, 1.25f, 1.5f, 1.75f, 2f, 2.5f, 3f)
         AlertDialog.Builder(this)
-            .setTitle("Reading speed")
+            .setTitle("Reading speed for this book")
             .setItems(rates.map { fmtRate(it) }.toTypedArray()) { _, w ->
-                Settings.setRate(this, rates[w])
+                Settings.setBookRate(this, book.id, rates[w])
                 TtsService.instance?.applySettings(true)
                 refreshButtons()
             }
@@ -391,6 +414,7 @@ class ReaderActivity : Activity() {
         items += "Bookmark this paragraph"
         items += "Add a note…"
         items += "Copy text"
+        items += "Look up a word…"
         if (here.isNotEmpty()) items += "Remove bookmark / notes here"
         AlertDialog.Builder(this)
             .setTitle(paras[p].take(80) + if (paras[p].length > 80) "…" else "")
@@ -404,7 +428,8 @@ class ReaderActivity : Activity() {
                             .setPrimaryClip(ClipData.newPlainText("Shelf Reader", paras[p]))
                         toast("Copied")
                     }
-                    4 -> {
+                    4 -> lookUpIn(paras[p])
+                    5 -> {
                         Library.saveNotes(this, book.id, notes.filter { it.para != p })
                         reloadNotes()
                     }
@@ -492,18 +517,18 @@ class ReaderActivity : Activity() {
             it.locale.language == lang &&
                 !(it.features?.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) ?: false)
         }.sortedWith(compareBy<Voice>({ it.isNetworkConnectionRequired }, { it.locale.toString() }, { it.name }))
-        val chosen = Settings.voice(this)
+        val chosen = Settings.voiceFor(this, book.id)
         val labels = ArrayList<String>()
         labels += (if (chosen == null) "✓ " else "") + "System default voice"
         for (v in voices) labels += (if (v.name == chosen) "✓ " else "") + voiceLabel(v)
         labels += "Get more voices…"
         AlertDialog.Builder(this)
-            .setTitle("Voice")
+            .setTitle("Voice for this book")
             .setItems(labels.toTypedArray()) { _, w ->
                 when (w) {
-                    0 -> Settings.setVoice(this, null)
+                    0 -> Settings.setBookVoice(this, book.id, null)
                     labels.size - 1 -> { openTtsSettings(); return@setItems }
-                    else -> Settings.setVoice(this, voices[w - 1].name)
+                    else -> Settings.setBookVoice(this, book.id, voices[w - 1].name)
                 }
                 TtsService.instance?.applySettings(true)
                 if (service() == null && loaded) toast("Voice saved — press Play to hear it.")
@@ -575,11 +600,103 @@ class ReaderActivity : Activity() {
         toast("Exporting in the background. Progress is in your notifications.")
     }
 
+    // ---------- word lookup ----------
+
+    /** Shows the paragraph with selectable text; select a word and tap "Define". */
+    private fun lookUpIn(text: String) {
+        val tv = TextView(this).apply {
+            this.text = text
+            textSize = 18f
+            setTextIsSelectable(true)
+            setPadding(dp(20), dp(12), dp(20), dp(12))
+        }
+        tv.customSelectionActionModeCallback = object : ActionMode.Callback {
+            override fun onCreateActionMode(mode: ActionMode, menu: Menu): Boolean {
+                menu.add(0, 99, 0, "Define")
+                return true
+            }
+            override fun onPrepareActionMode(mode: ActionMode, menu: Menu) = false
+            override fun onActionItemClicked(mode: ActionMode, item: MenuItem): Boolean {
+                if (item.itemId != 99) return false
+                val sel = tv.text.subSequence(maxOf(0, tv.selectionStart), maxOf(0, tv.selectionEnd)).toString()
+                mode.finish()
+                define(sel)
+                return true
+            }
+            override fun onDestroyActionMode(mode: ActionMode) {}
+        }
+        val scroll = ScrollView(this).apply { addView(tv) }
+        AlertDialog.Builder(this)
+            .setTitle("Press and hold a word, then tap Define")
+            .setView(scroll)
+            .setNegativeButton("Close", null)
+            .show()
+    }
+
+    private fun define(word: String) {
+        val w = word.trim().split(Regex("\\s+")).firstOrNull()?.trim { !it.isLetter() } ?: return
+        if (w.isEmpty()) return
+        toast("Looking up “$w”…")
+        Thread {
+            val result = try { Dictionary.define(w) } catch (t: Throwable) { "Couldn't look that up: ${t.message}" }
+            runOnUiThread {
+                AlertDialog.Builder(this).setTitle(w).setMessage(result).setPositiveButton("OK", null).show()
+            }
+        }.start()
+    }
+
+    // ---------- search in book ----------
+
+    private fun searchInBook() {
+        if (!loaded) return
+        val box = EditText(this).apply { hint = "Word or phrase"; isSingleLine = true }
+        val wrap = LinearLayout(this).apply {
+            setPadding(dp(20), dp(8), dp(20), 0)
+            addView(box, LinearLayout.LayoutParams(MATCH, WRAP))
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Search in this book")
+            .setView(wrap)
+            .setPositiveButton("Search") { _, _ -> showSearchResults(box.text.toString().trim()) }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun showSearchResults(q: String) {
+        if (q.length < 2) return
+        val hits = ArrayList<Int>()
+        for ((i, p) in paras.withIndex()) {
+            if (p.contains(q, ignoreCase = true)) { hits += i; if (hits.size >= 300) break }
+        }
+        if (hits.isEmpty()) { toast("“$q” wasn't found in this book."); return }
+        val labels = hits.map { i ->
+            val p = paras[i]
+            val at = p.indexOf(q, ignoreCase = true)
+            val from = maxOf(0, at - 40)
+            val snippet = (if (from > 0) "…" else "") + p.substring(from, minOf(p.length, at + q.length + 60)) + "…"
+            val ch = chapterIndex(i).let { if (it >= 0) chapters[it].title else "Paragraph ${i + 1}" }
+            "$ch\n$snippet"
+        }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle("${hits.size}${if (hits.size >= 300) "+" else ""} matches for “$q”")
+            .setItems(labels) { _, w -> goTo(hits[w]) }
+            .show()
+    }
+
+    // ---------- collections ----------
+
+    private fun collectionsDialog() {
+        editCollections(this, book.id) {}
+    }
+
     // ---------- menu ----------
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
         menu.add(0, 1, 0, "Chapters")
+        menu.add(0, 11, 0, "Search in book")
+        menu.add(0, 12, 0, "Car mode")
         menu.add(0, 2, 0, "Bookmarks & notes")
+        menu.add(0, 13, 0, "Collections…")
         menu.add(0, 3, 0, "Sleep timer")
         menu.add(0, 4, 0, "Voice")
         menu.add(0, 5, 0, "Appearance")
@@ -613,6 +730,9 @@ class ReaderActivity : Activity() {
             8 -> exportMenu()
             9 -> goTo(0)
             10 -> openTtsSettings()
+            11 -> searchInBook()
+            12 -> startActivity(Intent(this, CarModeActivity::class.java).putExtra("book", book.id))
+            13 -> collectionsDialog()
             else -> return super.onOptionsItemSelected(item)
         }
         return true

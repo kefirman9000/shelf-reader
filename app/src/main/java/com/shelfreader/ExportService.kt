@@ -115,7 +115,7 @@ class ExportService : Service() {
         stopSelf()
     }
 
-    private fun initTts() {
+    private fun initTts(bookId: String) {
         val latch = CountDownLatch(1)
         var ok = false
         tts = TextToSpeech(this) { st ->
@@ -125,8 +125,8 @@ class ExportService : Service() {
         latch.await(30, TimeUnit.SECONDS)
         val t = tts
         if (!ok || t == null) throw Exception("text-to-speech isn't available")
-        t.setSpeechRate(Settings.rate(this))
-        Settings.voice(this)?.let { name ->
+        t.setSpeechRate(Settings.rateFor(this, bookId))
+        Settings.voiceFor(this, bookId)?.let { name ->
             try { t.voices?.firstOrNull { it.name == name }?.let { t.voice = it } } catch (e: Throwable) {}
         }
         t.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
@@ -166,7 +166,7 @@ class ExportService : Service() {
         val chapters = doc.chapters.ifEmpty { listOf(Chapter(b.title, 0)) }
         val a = from.coerceIn(0, chapters.size - 1)
         val z = to.coerceIn(a, chapters.size - 1)
-        initTts()
+        initTts(bookId)
 
         val rootDoc = DocumentsContract.buildDocumentUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree))
         val folder = DocumentsContract.createDocument(

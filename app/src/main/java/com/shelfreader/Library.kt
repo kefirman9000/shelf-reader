@@ -23,20 +23,33 @@ object Library {
     fun dir(ctx: Context) = File(ctx.filesDir, "books").apply { mkdirs() }
     private fun prefs(ctx: Context) = ctx.getSharedPreferences("positions", Context.MODE_PRIVATE)
 
+    fun fromJson(text: String): MutableList<Book> = try {
+        val arr = JSONArray(text)
+        (0 until arr.length()).map {
+            val o = arr.getJSONObject(it)
+            Book(o.getString("id"), o.optString("title"), o.optString("author"),
+                o.getString("file"), o.getString("format"), o.optLong("added"))
+        }.toMutableList()
+    } catch (t: Throwable) {
+        mutableListOf()
+    }
+
     @Synchronized
     fun load(ctx: Context): MutableList<Book> {
         val f = indexFile(ctx)
         if (!f.exists()) return mutableListOf()
-        return try {
-            val arr = JSONArray(f.readText())
-            (0 until arr.length()).map {
-                val o = arr.getJSONObject(it)
-                Book(o.getString("id"), o.optString("title"), o.optString("author"),
-                    o.getString("file"), o.getString("format"), o.optLong("added"))
-            }.toMutableList()
-        } catch (t: Throwable) {
-            mutableListOf()
-        }
+        return fromJson(f.readText())
+    }
+
+    /** Adds books that aren't already in the library (used by restore). Returns how many were added. */
+    @Synchronized
+    fun merge(ctx: Context, incoming: List<Book>): Int {
+        val list = load(ctx)
+        val have = list.map { it.id }.toHashSet()
+        var n = 0
+        for (b in incoming) if (b.id !in have && File(dir(ctx), b.file).exists()) { list.add(b); n++ }
+        save(ctx, list)
+        return n
     }
 
     @Synchronized
@@ -65,6 +78,8 @@ object Library {
         for (name in listOf(b.file, "${b.id}.paras", "${b.id}.v2.paras", "${b.id}.v2.chap", "${b.id}.notes.json", "${b.id}.cover.jpg")) {
             File(d, name).delete()
         }
+        Collections.forget(ctx, b.id)
+        Settings.forgetBook(ctx, b.id)
         prefs(ctx).edit().remove("pos_${b.id}").remove("off_${b.id}").remove("len_${b.id}").remove("opened_${b.id}").apply()
     }
 
@@ -145,6 +160,21 @@ object Settings {
     private fun p(ctx: Context) = ctx.getSharedPreferences("settings", Context.MODE_PRIVATE)
 
     fun rate(ctx: Context) = p(ctx).getFloat("rate", 1f)
+    /** Speed for a book: its own if you've set one, otherwise your default. */
+    fun rateFor(ctx: Context, id: String?): Float = if (id == null) rate(ctx) else p(ctx).getFloat("rate_$id", rate(ctx))
+    fun setBookRate(ctx: Context, id: String, r: Float) = p(ctx).edit().putFloat("rate_$id", r).putFloat("rate", r).apply()
+    fun voiceFor(ctx: Context, id: String?): String? =
+        if (id != null && p(ctx).contains("voice_$id")) p(ctx).getString("voice_$id", null)?.ifEmpty { null } else voice(ctx)
+    fun setBookVoice(ctx: Context, id: String, v: String?) =
+        p(ctx).edit().putString("voice_$id", v ?: "").putString("voice", v).apply()
+    fun forgetBook(ctx: Context, id: String) = p(ctx).edit().remove("rate_$id").remove("voice_$id").apply()
+
+    fun seenVoiceGuide(ctx: Context) = p(ctx).getBoolean("seenVoiceGuide", false)
+    fun setSeenVoiceGuide(ctx: Context) = p(ctx).edit().putBoolean("seenVoiceGuide", true).apply()
+    fun resumeOnHeadphones(ctx: Context) = p(ctx).getBoolean("resumeOnHeadphones", true)
+    fun setResumeOnHeadphones(ctx: Context, v: Boolean) = p(ctx).edit().putBoolean("resumeOnHeadphones", v).apply()
+    fun libraryFilter(ctx: Context): String = p(ctx).getString("libraryFilter", "") ?: ""
+    fun setLibraryFilter(ctx: Context, v: String) = p(ctx).edit().putString("libraryFilter", v).apply()
     fun setRate(ctx: Context, r: Float) = p(ctx).edit().putFloat("rate", r).apply()
     fun voice(ctx: Context): String? = p(ctx).getString("voice", null)
     fun setVoice(ctx: Context, v: String?) = p(ctx).edit().putString("voice", v).apply()
@@ -184,4 +214,49 @@ object Settings {
         for (f in list) arr.put(JSONObject().apply { put("f", f.from); put("t", f.to) })
         p(ctx).edit().putString("fixes", arr.toString()).apply()
     }
+}
+
+/** Collections ("Want to read", "Finished", and your own). A book can be in several. */
+object Collections {
+    const val WANT = "Want to read"
+    const val FINISHED = "Finished"
+    private fun p(ctx: Context) = ctx.getSharedPreferences("collections", Context.MODE_PRIVATE)
+
+    fun names(ctx: Context): List<String> {
+        val custom = try {
+            val arr = JSONArray(p(ctx).getString("_names", "[]"))
+            (0 until arr.length()).map { arr.getString(it) }
+        } catch (t: Throwable) { emptyList() }
+        return listOf(WANT, FINISHED) + custom.filter { it != WANT && it != FINISHED }
+    }
+
+    fun create(ctx: Context, name: String) {
+        val n = name.trim()
+        if (n.isEmpty() || n in names(ctx)) return
+        val custom = names(ctx).drop(2) + n
+        p(ctx).edit().putString("_names", JSONArray(custom).toString()).apply()
+    }
+
+    fun delete(ctx: Context, name: String) {
+        val custom = names(ctx).drop(2).filter { it != name }
+        val e = p(ctx).edit().putString("_names", JSONArray(custom).toString())
+        for ((k, _) in p(ctx).all) if (!k.startsWith("_")) {
+            val s = of(ctx, k)
+            if (name in s) e.putString(k, JSONArray(s - name).toString())
+        }
+        e.apply()
+    }
+
+    fun of(ctx: Context, bookId: String): Set<String> = try {
+        val arr = JSONArray(p(ctx).getString(bookId, "[]"))
+        (0 until arr.length()).map { arr.getString(it) }.toSet()
+    } catch (t: Throwable) { emptySet() }
+
+    fun set(ctx: Context, bookId: String, names: Set<String>) {
+        p(ctx).edit().putString(bookId, JSONArray(names.toList()).toString()).apply()
+    }
+
+    fun add(ctx: Context, bookId: String, name: String) = set(ctx, bookId, of(ctx, bookId) + name)
+
+    fun forget(ctx: Context, bookId: String) = p(ctx).edit().remove(bookId).apply()
 }

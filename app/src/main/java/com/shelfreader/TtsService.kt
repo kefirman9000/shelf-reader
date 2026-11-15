@@ -11,6 +11,8 @@ import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.graphics.drawable.Icon
 import android.media.AudioAttributes
+import android.media.AudioDeviceCallback
+import android.media.AudioDeviceInfo
 import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.media.MediaDescription
@@ -99,6 +101,23 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
         }
     }
 
+    /** Resumes reading when headphones connect (while the book is paused, not stopped). */
+    private var deviceEventsReady = false
+    private val deviceCallback = object : AudioDeviceCallback() {
+        override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>?) {
+            if (!deviceEventsReady || playing || bookId == null) return
+            if (!Settings.resumeOnHeadphones(this@TtsService)) return
+            val headphones = addedDevices?.any {
+                it.isSink && it.type in setOf(
+                    AudioDeviceInfo.TYPE_WIRED_HEADSET, AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
+                    AudioDeviceInfo.TYPE_BLUETOOTH_A2DP, AudioDeviceInfo.TYPE_USB_HEADSET,
+                    AudioDeviceInfo.TYPE_BLE_HEADSET
+                )
+            } ?: false
+            if (headphones) main.postDelayed({ if (!playing && bookId != null) play() }, 1500)
+        }
+    }
+
     private val sleepTick = object : Runnable {
         override fun run() {
             if (sleepDeadline == 0L) return
@@ -138,6 +157,8 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
         if (Build.VERSION.SDK_INT >= 33) registerReceiver(noisyReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
         else registerReceiver(noisyReceiver, filter)
         tts = TextToSpeech(this, this)
+        audioManager.registerAudioDeviceCallback(deviceCallback, main)
+        main.postDelayed({ deviceEventsReady = true }, 3000)   // ignore devices already connected
     }
 
     // ---------- Android Auto / media browser ----------
@@ -228,6 +249,7 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
         Settings.setLastBook(this, id)
         segIndex = segFor(Library.position(this, id), Library.offset(this, id))
         lastNotifKey = ""
+        applySettings(false)
         session.setMetadata(
             MediaMetadata.Builder()
                 .putString(MediaMetadata.METADATA_KEY_TITLE, title)
@@ -296,6 +318,42 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
         update()
     }
 
+    /** Jumps roughly [seconds] of listening forward or back (estimated from text length and speed). */
+    fun seekSeconds(seconds: Int) {
+        if (segs.isEmpty()) return
+        val chars = (kotlin.math.abs(seconds) * 15 * Settings.rateFor(this, bookId)).toInt()
+        var k = segIndex
+        var acc = 0
+        if (seconds < 0) {
+            while (k > 0 && acc < chars) { k--; acc += segs[k].end - segs[k].start }
+        } else {
+            while (k < segs.size - 1 && acc < chars) { acc += segs[k].end - segs[k].start; k++ }
+        }
+        segIndex = k
+        savePos()
+        if (playing && ready) speakFrom(segIndex)
+        update()
+    }
+
+    /** Next / previous chapter. "Previous" first restarts the current chapter if you're well into it. */
+    fun skipChapter(delta: Int) {
+        if (segs.isEmpty()) return
+        if (chapters.isEmpty()) { skip(delta * 10); return }
+        val ci = chapterIndexOf(index)
+        val target = if (delta < 0) {
+            val start = if (ci >= 0) segFor(chapters[ci].para) else 0
+            if (ci >= 0 && segIndex - start > 3) ci else ci - 1
+        } else ci + 1
+        if (target >= chapters.size) return
+        segIndex = if (target < 0) 0 else segFor(chapters[target].para)
+        savePos()
+        if (playing && ready) speakFrom(segIndex)
+        update()
+    }
+
+    fun chapterTitle(): String? = chapterIndexOf(index).let { if (it >= 0) chapters[it].title else null }
+    fun bookTitle(): String = title
+
     fun stopAll() {
         if (playing) pause()
         setSleep(0)
@@ -310,8 +368,8 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
         speaker = Speaker(this)
         val t = tts ?: return
         if (!ready) return
-        t.setSpeechRate(Settings.rate(this))
-        val wanted = Settings.voice(this)
+        t.setSpeechRate(Settings.rateFor(this, bookId))
+        val wanted = Settings.voiceFor(this, bookId)
         try {
             if (wanted != null) t.voices?.firstOrNull { it.name == wanted }?.let { t.voice = it }
             else t.defaultVoice?.let { t.voice = it }
@@ -354,6 +412,11 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
     }
 
     private fun finished() {
+        val id = bookId
+        if (id != null && segs.isNotEmpty() && segIndex >= segs.size - 3) {
+            Collections.add(this, id, Collections.FINISHED)
+            Collections.set(this, id, Collections.of(this, id) - Collections.WANT)
+        }
         playing = false
         releaseWake()
         update()
@@ -554,6 +617,7 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
         instance = null
         gen++
         main.removeCallbacks(sleepTick)
+        try { audioManager.unregisterAudioDeviceCallback(deviceCallback) } catch (e: Throwable) {}
         try { unregisterReceiver(noisyReceiver) } catch (e: Throwable) {}
         tts?.stop()
         tts?.shutdown()
