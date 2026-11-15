@@ -63,8 +63,19 @@
         <button id="findBtn" title="Search in book (Ctrl+F)">Search</button>
         <button id="notesBtn" title="Bookmarks &amp; notes">Bookmarks</button>
         <button id="exportBtn" title="Save chapters as MP3 files" hidden>Export audio</button>
+        <button id="layoutBtn" title="Switch between turning pages and scrolling">Scroll view</button>
+        <button id="focusBtn" class="icon" title="Full screen (F)">⛶</button>
       </div>
       <div id="textWrap"><div id="text"></div></div>
+      <div id="bookWrap" hidden>
+        <div id="book">
+          <div class="bk-head"><span id="bkHeadL"></span><span id="bkHeadR"></span></div>
+          <div id="pageFrame"><div id="pages"></div></div>
+          <div class="bk-foot"><span id="bkFootL"></span><button id="bkListen" title="Read aloud from the top of this page">▶ Listen from this page</button><span id="bkFootR"></span></div>
+          <button id="turnPrev" class="turn" title="Previous page (←)">‹</button>
+          <button id="turnNext" class="turn" title="Next page (→)">›</button>
+        </div>
+      </div>
     </section>
   </main>
 
@@ -101,9 +112,11 @@
   <div id="menu" hidden></div>
   <button id="defineBubble" hidden></button>
   <div id="toast" hidden></div>
+  <button id="focusExit" hidden title="Leave full screen (Esc)">✕ Exit full screen</button>
   <div id="dropHint" hidden>Drop EPUB, PDF or TXT files to add them</div>
   <audio id="keepAlive" loop></audio>
   <script src="engines.js"></script>
+  <script src="book.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

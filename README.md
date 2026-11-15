@@ -9,11 +9,11 @@ An Android ebook reader that finds free, legal books and **reads them aloud** wi
 
 <table>
   <tr>
-    <td><img src="docs/screenshots/desktop-reader.png" alt="Reader with the current sentence highlighted"></td>
+    <td><img src="docs/screenshots/desktop-book.png" alt="Book view: a two-page spread, reading aloud with the current sentence highlighted"></td>
     <td><img src="docs/screenshots/desktop-chapters.png" alt="Chapter list"></td>
   </tr>
   <tr>
-    <td align="center"><sub>Reading aloud: the current sentence is highlighted</sub></td>
+    <td align="center"><sub>Book view: turn pages like a real book while it reads aloud</sub></td>
     <td align="center"><sub>Chapters from the book's table of contents</sub></td>
   </tr>
   <tr>
@@ -96,6 +96,7 @@ You can also **import** your own DRM-free **EPUB, PDF or TXT** files.
 - **Pronunciation fixes:** teach it how to say names and words it gets wrong.
 
 ### Reading
+- **Book view (PC):** pages you turn instead of one long scroll. Two-page spreads on wide windows, page numbers, chapter headers, decorative first letters, chapters starting on a new page, and minutes left in the chapter. Turn pages with the arrow keys, the mouse wheel, or by clicking the page edges. While reading aloud, it turns the pages for you. **Scroll view** is one click away, and **F** goes full screen.
 - **Chapter list** taken from the book's table of contents (or detected in plain text).
 - **Bookmarks and notes:** long-press any paragraph.
 - **Themes:** dark, light, sepia and black, with a choice of font, margins and text size.

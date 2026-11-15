@@ -52,6 +52,16 @@ function applyAppearance() {
   t.style.fontFamily = FONTS[s.font || 0];
   t.style.fontSize = (s.textSize || 19) + 'px';
   t.style.maxWidth = WIDTHS[s.margin ?? 1] + 'px';
+  const pg = $('#pages');
+  pg.style.fontFamily = FONTS[s.font || 0];
+  pg.style.fontSize = (s.textSize || 19) + 'px';
+  const bk = $('#book');
+  bk.style.setProperty('--bookmax', [1500, 1280, 1040][s.margin ?? 1] + 'px');
+  bk.style.setProperty('--bpad', [36, 56, 80][s.margin ?? 1] + 'px');
+  if (S.view === 'reader' && bookMode() && BK.sec >= 0) {
+    const anchor = S.playing ? curPara() : bkTopPara();
+    requestAnimationFrame(() => { bkLayout(); bkGo(bkViewOfPara(anchor), { animate: false, quiet: true }); });
+  }
 }
 
 // ---------- views ----------
@@ -364,6 +374,16 @@ function renderReader() {
   if (!S.book) return;
   $('#rTitle').textContent = S.book.title;
   document.title = S.book.title + ' — Shelf Reader';
+  const book = bookMode();
+  $('#reader').classList.toggle('bookmode', book);
+  $('#bookWrap').hidden = !book;
+  $('#layoutBtn').textContent = book ? 'Scroll view' : 'Book view';
+  if (book) {
+    S.renderedFor = null;
+    $('#text').innerHTML = '';
+    requestAnimationFrame(() => { bkShow(); $('#pages').classList.toggle('listening', S.playing); highlight(true); });
+    return;
+  }
   if (S.renderedFor !== S.book.id) {
     const chapStarts = new Set(S.chapters.map((c) => c.para));
     const marks = noteMarks();
@@ -378,23 +398,37 @@ function noteMarks() {
   for (const n of S.bookState.notes || []) m[n.para] = `<span class="mk" title="${esc(n.text || 'Bookmark')}">${n.text ? '📝' : '🔖'}</span>`;
   return m;
 }
-function refreshMarks() { S.renderedFor = null; if (S.view === 'reader') { const y = $('#reader').scrollTop; renderReader(); $('#reader').scrollTop = y; } }
+function refreshMarks() {
+  if (S.view !== 'reader') return;
+  if (bookMode() && BK.sec >= 0) { const v = BK.view; bkRenderSection(BK.sec, {}); bkGo(v, { animate: false, quiet: true }); highlight(); return; }
+  S.renderedFor = null; const y = $('#reader').scrollTop; renderReader(); $('#reader').scrollTop = y;
+}
 let lastUserScroll = 0;
 $('#reader').addEventListener('wheel', () => (lastUserScroll = Date.now()), { passive: true });
 $('#reader').addEventListener('keydown', () => (lastUserScroll = Date.now()));
 function highlight(forceScroll = false) {
-  if (S.view !== 'reader' || S.renderedFor !== (S.book && S.book.id)) return;
+  if (S.view !== 'reader' || !S.book) return;
+  const book = bookMode();
+  if (!book && S.renderedFor !== S.book.id) return;
   const seg = S.segs[S.segIdx]; if (!seg) return;
   const [pi, a, b] = seg;
+  const box = book ? '#pages' : '#text';
+  if (book) {
+    if (BK.sec < 0) return;
+    $('#pages').classList.toggle('listening', S.playing);
+    const sec = BK.sections[BK.sec];
+    if (pi < sec.start || pi >= sec.end) { if (forceScroll || Date.now() - BK.lastTurn > 8000) { bkRenderSection(bkSectionOf(pi), { para: pi }); } else return; }
+  }
   if (S.hlPara >= 0 && S.hlPara !== pi) {
-    const old = $(`#text p[data-i="${S.hlPara}"]`);
+    const old = $(`${box} p[data-i="${S.hlPara}"]`);
     if (old) { old.classList.remove('cur'); old.querySelector('.tx').textContent = S.paras[S.hlPara]; }
   }
-  const el = $(`#text p[data-i="${pi}"]`); if (!el) return;
+  const el = $(`${box} p[data-i="${pi}"]`); if (!el) return;
   el.classList.add('cur');
   const p = S.paras[pi];
   el.querySelector('.tx').innerHTML = esc(p.slice(0, a)) + '<mark>' + esc(p.slice(a, b)) + '</mark>' + esc(p.slice(b));
   const moved = S.hlPara !== pi; S.hlPara = pi;
+  if (book) { bkFollow(forceScroll); $('#rChap').textContent = chapterTitle(pi) || S.book.author || ''; return; }
   if (forceScroll || (moved && Date.now() - lastUserScroll > 6000)) {
     const r = el.getBoundingClientRect(); const box = $('#reader').getBoundingClientRect();
     if (forceScroll || r.top < box.top + 60 || r.bottom > box.bottom - 40) el.scrollIntoView({ block: 'center', behavior: forceScroll ? 'auto' : 'smooth' });
@@ -405,7 +439,7 @@ $('#text').addEventListener('click', (e) => {
   const go = e.target.closest('.go');
   if (go) { const i = +go.parentNode.dataset.i; jumpTo(i, true); }
 });
-$('#text').addEventListener('contextmenu', (e) => {
+const paraMenu = (e) => {
   const p = e.target.closest('p[data-i]'); if (!p) return;
   e.preventDefault();
   const i = +p.dataset.i;
@@ -419,8 +453,16 @@ $('#text').addEventListener('contextmenu', (e) => {
   if (sel && sel.split(/\s+/).length <= 3) items.push([`Define “${sel.slice(0, 30)}”`, () => define(sel)]);
   if ((S.bookState.notes || []).some((n) => n.para === i)) items.push(null, ['Remove bookmark / notes here', () => removeNotes(i)]);
   showMenu(e.clientX, e.clientY, items);
-});
-$('#backBtn').onclick = () => { document.title = 'Shelf Reader'; show('library'); };
+};
+$('#text').addEventListener('contextmenu', paraMenu);
+$('#pages').addEventListener('contextmenu', paraMenu);
+$('#backBtn').onclick = () => { document.title = 'Shelf Reader'; if (document.body.classList.contains('focus')) bkSetFocus(false); show('library'); };
+$('#layoutBtn').onclick = async () => {
+  const anchor = bookMode() ? (S.playing ? curPara() : bkTopPara()) : curPara();
+  await saveSettings({ layout: bookMode() ? 'scroll' : 'book' });
+  if (!S.playing) { S.segIdx = segFor(anchor); savePos(true); }
+  renderReader();
+};
 
 // Define bubble on word selection
 document.addEventListener('mouseup', (e) => {
@@ -429,7 +471,7 @@ document.addEventListener('mouseup', (e) => {
   setTimeout(() => {
     const sel = window.getSelection();
     const word = String(sel || '').trim();
-    if (S.view !== 'reader' || !word || word.includes(' ') || word.length > 40 || !sel.anchorNode || !$('#text').contains(sel.anchorNode)) { bubble.hidden = true; return; }
+    if (S.view !== 'reader' || !word || word.includes(' ') || word.length > 40 || !sel.anchorNode || !($('#text').contains(sel.anchorNode) || $('#pages').contains(sel.anchorNode))) { bubble.hidden = true; return; }
     const r = sel.getRangeAt(0).getBoundingClientRect();
     bubble.textContent = `Define “${word}”`;
     bubble.style.left = Math.max(8, r.left) + 'px'; bubble.style.top = Math.max(8, r.top - 34) + 'px';
@@ -499,6 +541,7 @@ $('#drawerBody').onclick = async (e) => {
   const del = e.target.closest('[data-del]');
   if (del) { e.stopPropagation(); const notes = (S.bookState.notes || []).slice(); notes.splice(+del.dataset.del, 1); await saveState({ notes }); refreshMarks(); showNotes(); return; }
   const it = e.target.closest('[data-p]'); if (!it) return;
+  if ($('#drawerTitle').textContent !== 'Search in book' || bookMode()) closeDrawer();
   jumpTo(+it.dataset.p, false);
   if (S.view !== 'reader') { show('reader'); renderReader(); }
 };
@@ -634,6 +677,7 @@ function play() {
   if (!S.book || !S.segs.length) return;
   S.playing = true;
   keepAlive(true);
+  $('#pages').classList.add('listening');
   speakFrom(S.segIdx);
   updatePlayer();
   if (S.view === 'library') renderLibrary();
@@ -644,6 +688,7 @@ function pause() {
   speechSynthesis.cancel();
   stopAudio();
   keepAlive(false);
+  $('#pages').classList.remove('listening');
   savePos(true);
   updatePlayer();
   if (S.view === 'library') renderLibrary();
@@ -831,10 +876,14 @@ function setMediaSession() {
 // ---------- keyboard ----------
 document.addEventListener('keydown', (e) => {
   const typing = /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName);
-  if (e.key === 'Escape') { $('#modal').hidden = true; $('#menu').hidden = true; closeDrawer(); return; }
+  if (e.key === 'Escape') { $('#modal').hidden = true; $('#menu').hidden = true; closeDrawer(); if (document.body.classList.contains('focus')) bkSetFocus(false); return; }
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f' && S.book && S.view === 'reader') { e.preventDefault(); showFind(); return; }
   if (typing || !$('#modal').hidden) return;
+  const pagesShown = S.view === 'reader' && bookMode() && S.book;
   if (e.key === ' ' && S.book) { e.preventDefault(); toggle(); }
+  else if (pagesShown && !e.shiftKey && (e.key === 'ArrowRight' || e.key === 'PageDown')) { e.preventDefault(); bkNext(); }
+  else if (pagesShown && !e.shiftKey && (e.key === 'ArrowLeft' || e.key === 'PageUp')) { e.preventDefault(); bkPrev(); }
+  else if (e.key.toLowerCase() === 'f' && S.view === 'reader' && !e.ctrlKey) { bkSetFocus(!document.body.classList.contains('focus')); }
   else if (e.key === 'ArrowRight' && S.book) { e.preventDefault(); e.shiftKey ? stepChapter(1) : stepPara(1); }
   else if (e.key === 'ArrowLeft' && S.book) { e.preventDefault(); e.shiftKey ? stepChapter(-1) : stepPara(-1); }
   else if (e.key.toLowerCase() === 'b' && S.book) addNote(curPara(), '');
@@ -889,7 +938,7 @@ function openSettings() {
     <h3>Updates</h3>
     <div class="setrow"><span class="muted">Version ${esc(S.info.version || '')}</span><button id="sUpdate">Check for updates</button></div>
     <h3>Keyboard</h3>
-    <p class="muted"><kbd>Space</kbd> play/pause · <kbd>←</kbd>/<kbd>→</kbd> paragraph · <kbd>Shift</kbd>+<kbd>←</kbd>/<kbd>→</kbd> chapter · <kbd>B</kbd> bookmark · <kbd>C</kbd> chapters · <kbd>Ctrl</kbd>+<kbd>F</kbd> search in book · media keys work too</p>`,
+    <p class="muted"><kbd>Space</kbd> play/pause · <kbd>←</kbd>/<kbd>→</kbd> turn page (Book view) or paragraph (Scroll view) · <kbd>F</kbd> full screen · <kbd>Shift</kbd>+<kbd>←</kbd>/<kbd>→</kbd> chapter · <kbd>B</kbd> bookmark · <kbd>C</kbd> chapters · <kbd>Ctrl</kbd>+<kbd>F</kbd> search in book · media keys work too</p>`,
   [['Done', null, true]]);
   $('#sTheme').onchange = (e) => saveSettings({ theme: +e.target.value });
   $('#sFont').onchange = (e) => saveSettings({ font: +e.target.value });
@@ -981,6 +1030,7 @@ $('#exportBtn').onclick = () => {
 };
 
 // ---------- start ----------
+bkInit();
 (async function init() {
   S.info = await api('/api/info');
   S.settings = await api('/api/settings');
