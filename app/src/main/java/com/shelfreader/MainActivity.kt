@@ -10,6 +10,8 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.OpenableColumns
 import android.view.Gravity
+import android.view.Menu
+import android.view.MenuItem
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
@@ -39,7 +41,16 @@ class MainActivity : Activity() {
     private var searchGen = 0
     private var busy = false
     private var showingSearch = false
-    private val pool = Executors.newFixedThreadPool(4)
+    private val pool = Executors.newFixedThreadPool(8)
+
+    private val sources: List<Pair<String, (String) -> List<SearchResult>>> = listOf(
+        "Gutenberg" to { s -> Sources.gutenberg(s) },
+        "Standard Ebooks" to { s -> Sources.standardEbooks(s) },
+        "Internet Archive" to { s -> Sources.archive(s) },
+        "Open Library" to { s -> Sources.openLibrary(s) },
+        "Wikisource" to { s -> Sources.wikisource(s) },
+        "Feedbooks" to { s -> Sources.feedbooks(s) }
+    )
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -59,8 +70,8 @@ class MainActivity : Activity() {
         val lib = FrameLayout(this)
         libraryList = ListView(this)
         libraryEmpty = TextView(this).apply {
-            text = "No books yet.\n\nTap “Find books” to search Project Gutenberg, the Internet Archive and Open Library, " +
-                "or “Import” to open an EPUB, PDF or TXT file from your phone."
+            text = "No books yet.\n\nTap “Find books” to search Project Gutenberg, Standard Ebooks, the Internet Archive, " +
+                "Open Library, Wikisource and Feedbooks, or “Import” to open an EPUB, PDF or TXT file from your phone."
             gravity = Gravity.CENTER
             textSize = 16f
             setPadding(dp(32), dp(32), dp(32), dp(32))
@@ -89,8 +100,8 @@ class MainActivity : Activity() {
         searchStatus = TextView(this).apply {
             setPadding(dp(16), dp(4), dp(16), dp(8))
             alpha = 0.8f
-            text = "Searches free, legal sources: Project Gutenberg, the Internet Archive " +
-                "(public-domain and open-access books) and Open Library."
+            text = "Searches free, legal sources: Project Gutenberg, Standard Ebooks, the Internet Archive " +
+                "(public-domain and open-access books), Open Library, Wikisource and Feedbooks."
         }
         resultsList = ListView(this)
         search.addView(row)
@@ -114,6 +125,8 @@ class MainActivity : Activity() {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
         }
         showTab(false)
+
+        if (System.currentTimeMillis() - Settings.lastUpdateCheck(this) > 6 * 60 * 60 * 1000L) checkUpdates(false)
     }
 
     override fun onResume() {
@@ -129,6 +142,21 @@ class MainActivity : Activity() {
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
         if (showingSearch) showTab(false) else super.onBackPressed()
+    }
+
+    override fun onCreateOptionsMenu(menu: Menu): Boolean {
+        menu.add(0, 1, 0, "Pronunciation fixes")
+        menu.add(0, 2, 0, "Check for updates")
+        return true
+    }
+
+    override fun onOptionsItemSelected(item: MenuItem): Boolean {
+        when (item.itemId) {
+            1 -> editPronunciations { TtsService.instance?.applySettings(true) }
+            2 -> checkUpdates(true)
+            else -> return super.onOptionsItemSelected(item)
+        }
+        return true
     }
 
     private fun showTab(search: Boolean) {
@@ -155,7 +183,7 @@ class MainActivity : Activity() {
     private fun confirmDelete(b: Book) {
         AlertDialog.Builder(this)
             .setTitle("Remove book?")
-            .setMessage("“${b.title}” will be deleted from this phone.")
+            .setMessage("“${b.title}” will be deleted from this phone, along with its bookmarks and notes.")
             .setPositiveButton("Remove") { _, _ ->
                 if (TtsService.instance?.bookId == b.id) {
                     startService(Intent(this, TtsService::class.java).setAction(TtsService.ACTION_STOP))
@@ -165,6 +193,50 @@ class MainActivity : Activity() {
             }
             .setNegativeButton("Cancel", null)
             .show()
+    }
+
+    // ---------- updates ----------
+
+    private fun checkUpdates(manual: Boolean) {
+        if (manual) toast("Checking GitHub for updates…")
+        pool.execute {
+            try {
+                val r = Updater.latest()
+                val cur = Updater.currentBuild(this)
+                Settings.setLastUpdateCheck(this, System.currentTimeMillis())
+                runOnUiThread {
+                    if (r != null && r.build > cur) {
+                        AlertDialog.Builder(this)
+                            .setTitle("Update available")
+                            .setMessage("Build ${r.build} is ready (you have build $cur).")
+                            .setPositiveButton("Install") { _, _ -> installUpdate(r) }
+                            .setNegativeButton("Later", null)
+                            .show()
+                    } else if (manual) {
+                        toast("You're up to date (build $cur).")
+                    }
+                }
+            } catch (t: Throwable) {
+                if (manual) runOnUiThread {
+                    toast("Couldn't check for updates (${t.message}). The GitHub repo needs to be public for this to work.")
+                }
+            }
+        }
+    }
+
+    private fun installUpdate(r: Updater.Release) {
+        toast("Downloading update…")
+        pool.execute {
+            try {
+                val f = File(cacheDir, "update.apk")
+                f.delete()
+                Net.download(r.url, f) { _, _ -> }
+                runOnUiThread { toast("Installing — confirm on the next screen.") }
+                Updater.install(this, f)
+            } catch (t: Throwable) {
+                runOnUiThread { toast("Update failed: ${t.message}") }
+            }
+        }
     }
 
     // ---------- search ----------
@@ -179,7 +251,7 @@ class MainActivity : Activity() {
         searchStatus.text = "Searching…"
         val errors = ArrayList<String>()
         val seen = HashSet<String>()
-        var pending = 3
+        var pending = sources.size
 
         fun finishOne(source: String, list: List<SearchResult>?, err: Throwable?) {
             runOnUiThread {
@@ -191,19 +263,14 @@ class MainActivity : Activity() {
                         if (seen.add(key)) results.add(r)
                     }
                 }
-                if (err != null) errors.add("$source unavailable")
+                if (err != null) errors.add(source)
                 updateResults()
                 val head = if (pending > 0) "Searching… " else ""
-                val tail = if (errors.isNotEmpty()) " (" + errors.joinToString(", ") + ")" else ""
+                val tail = if (errors.isNotEmpty()) " (couldn't reach " + errors.joinToString(", ") + ")" else ""
                 searchStatus.text = "$head${results.size} results$tail. Tap one to download."
             }
         }
 
-        val sources: List<Pair<String, (String) -> List<SearchResult>>> = listOf(
-            "Gutenberg" to { s -> Sources.gutenberg(s) },
-            "Internet Archive" to { s -> Sources.archive(s) },
-            "Open Library" to { s -> Sources.openLibrary(s) }
-        )
         for ((name, fn) in sources) {
             pool.execute {
                 try { finishOne(name, fn(q), null) } catch (t: Throwable) { finishOne(name, null, t) }
@@ -227,6 +294,17 @@ class MainActivity : Activity() {
             .show()
     }
 
+    private fun checkFile(f: File, fmt: String) {
+        val head = ByteArray(5)
+        val n = f.inputStream().use { it.read(head) }
+        val ok = when (fmt) {
+            "epub" -> n >= 2 && head[0] == 'P'.code.toByte() && head[1] == 'K'.code.toByte()
+            "pdf" -> n >= 4 && String(head, 0, 4, Charsets.US_ASCII) == "%PDF"
+            else -> true
+        }
+        if (!ok) throw Exception("the site sent a web page instead of the book file")
+    }
+
     private fun download(r: SearchResult) {
         busy = true
         searchStatus.text = "Getting “${r.title}”…"
@@ -244,9 +322,17 @@ class MainActivity : Activity() {
                             if (total > 0) "${done * 100 / total}%" else "${done / 1024} KB"
                     }
                 }
-                runOnUiThread { searchStatus.text = "Preparing text…" }
-                val book = Book(id, r.title, r.author, file.name, fmt, System.currentTimeMillis())
-                Library.paragraphs(this, book) // extract now so problems show up here
+                checkFile(file, fmt)
+                runOnUiThread { searchStatus.text = "Preparing text and chapters…" }
+                var title = r.title
+                var author = r.author
+                if (fmt == "epub" && author.isBlank()) {
+                    val (t, a) = Extract.epubInfo(file)
+                    if (!a.isNullOrBlank()) author = a
+                    if (title.isBlank() && !t.isNullOrBlank()) title = t
+                }
+                val book = Book(id, title, author, file.name, fmt, System.currentTimeMillis())
+                Library.doc(this, book) // extract now so problems show up here
                 Library.add(this, book)
                 runOnUiThread {
                     busy = false
@@ -318,7 +404,7 @@ class MainActivity : Activity() {
                     if (!a.isNullOrBlank()) author = a
                 }
                 val book = Book(id, title, author, file.name, fmt, System.currentTimeMillis())
-                Library.paragraphs(this, book)
+                Library.doc(this, book)
                 Library.add(this, book)
                 runOnUiThread { refreshLibrary(); openBook(book) }
             } catch (t: Throwable) {

@@ -39,6 +39,6 @@ jobs:
         with:
           tag_name: build-${{ github.run_number }}
           name: Shelf Reader (build ${{ github.run_number }})
-          body: Download ShelfReader.apk below and open it on your phone to install.
+          body: Download ShelfReader.apk below and open it on your phone to install. If the app is already installed, use Menu → Check for updates inside the app.
           files: ShelfReader.apk
           make_latest: true

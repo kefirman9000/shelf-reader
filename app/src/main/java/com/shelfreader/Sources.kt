@@ -84,6 +84,65 @@ object Sources {
         return out
     }
 
+    /** Standard Ebooks: carefully proofread public-domain EPUBs. */
+    fun standardEbooks(q: String): List<SearchResult> {
+        val html = Net.get("https://standardebooks.org/ebooks?query=" + Net.enc(q))
+        val out = ArrayList<SearchResult>()
+        val seen = HashSet<String>()
+        val item = Regex("about=\"(/ebooks/[^\"#?]+)\"(.*?)(?=about=\"/ebooks/|</ol>|$)", RegexOption.DOT_MATCHES_ALL)
+        for (m in item.findAll(html)) {
+            val path = m.groupValues[1].trimEnd('/')
+            val slug = path.removePrefix("/ebooks/").split("/")
+            if (slug.size < 2 || !seen.add(path)) continue
+            val names = Regex("property=\"schema:name\"[^>]*>([^<]+)<").findAll(m.groupValues[2])
+                .map { Extract.decodeEntities(it.groupValues[1]).trim() }.filter { it.isNotEmpty() }.toList()
+            val title = names.getOrNull(0) ?: slug[1].replace('-', ' ').replaceFirstChar { it.uppercase() }
+            val author = names.getOrNull(1) ?: slug[0].split('-').joinToString(" ") { w -> w.replaceFirstChar { it.uppercase() } }
+            val file = slug.joinToString("_") + ".epub"
+            out += SearchResult("Standard Ebooks", title, author, "https://standardebooks.org$path/downloads/$file?source=download", "epub")
+        }
+        return out
+    }
+
+    /** Wikisource: public-domain texts, exported as EPUB by the Wikisource export tool. */
+    fun wikisource(q: String): List<SearchResult> {
+        val j = JSONObject(Net.get(
+            "https://en.wikisource.org/w/api.php?action=query&list=search&srnamespace=0&srlimit=30&format=json&srsearch=" + Net.enc(q)
+        ))
+        val arr = j.optJSONObject("query")?.optJSONArray("search") ?: return emptyList()
+        val out = ArrayList<SearchResult>()
+        for (i in 0 until arr.length()) {
+            val title = arr.getJSONObject(i).optString("title")
+            if (title.isEmpty() || title.contains('/')) continue   // skip individual chapter pages
+            val url = "https://ws-export.wmcloud.org/?format=epub-3&lang=en&page=" + Net.enc(title)
+            out += SearchResult("Wikisource", title, "", url, "epub")
+        }
+        return out
+    }
+
+    /** Feedbooks: only free / public-domain entries with an open EPUB download are kept. */
+    fun feedbooks(q: String): List<SearchResult> {
+        val xml = Net.get("https://catalog.feedbooks.com/search.atom?query=" + Net.enc(q))
+        val out = ArrayList<SearchResult>()
+        val dotAll = setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE)
+        for (m in Regex("<entry\\b.*?</entry>", dotAll).findAll(xml)) {
+            val e = m.value
+            val title = Regex("<title[^>]*>(.*?)</title>", dotAll).find(e)?.groupValues?.get(1)?.let { Extract.decodeEntities(it).trim() } ?: continue
+            val author = Regex("<author>\\s*<name>(.*?)</name>", dotAll).find(e)?.groupValues?.get(1)?.let { Extract.decodeEntities(it).trim() } ?: ""
+            var url: String? = null
+            for (l in Regex("<link\\b[^>]*>", RegexOption.IGNORE_CASE).findAll(e)) {
+                val tag = l.value
+                val rel = Regex("rel=\"([^\"]+)\"").find(tag)?.groupValues?.get(1) ?: continue
+                val type = Regex("type=\"([^\"]+)\"").find(tag)?.groupValues?.get(1) ?: ""
+                val href = Regex("href=\"([^\"]+)\"").find(tag)?.groupValues?.get(1) ?: continue
+                val open = rel == "http://opds-spec.org/acquisition" || rel == "http://opds-spec.org/acquisition/open-access"
+                if (open && type.contains("epub")) { url = Extract.decodeEntities(href); break }
+            }
+            if (url != null) out += SearchResult("Feedbooks", title, author, url, "epub")
+        }
+        return out
+    }
+
     /** Finds the best readable file in an Internet Archive item. Returns (url, format). */
     fun resolveArchive(id: String): Pair<String, String> {
         val j = JSONObject(Net.get("https://archive.org/metadata/" + Net.encPath(id)))

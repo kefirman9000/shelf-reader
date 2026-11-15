@@ -4,7 +4,6 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
-import android.app.Service
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -14,23 +13,27 @@ import android.graphics.drawable.Icon
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
+import android.media.MediaDescription
 import android.media.MediaMetadata
+import android.media.browse.MediaBrowser
 import android.media.session.MediaSession
 import android.media.session.PlaybackState
 import android.os.Build
+import android.os.Bundle
 import android.os.Handler
-import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
+import android.os.SystemClock
+import android.service.media.MediaBrowserService
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 
 /**
- * Reads the current book aloud as a foreground media service, so it keeps going
- * with the screen off or another app open. Controls live in the notification,
- * on the lock screen, and on headphone buttons.
+ * Reads the current book aloud, sentence by sentence, as a foreground media service so it
+ * keeps going with the screen off. Controls: notification, lock screen, headphones, the
+ * home-screen widget, and Android Auto (via MediaBrowserService).
  */
-class TtsService : Service(), TextToSpeech.OnInitListener {
+class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
 
     companion object {
         const val ACTION_PLAY = "com.shelfreader.PLAY"
@@ -39,8 +42,13 @@ class TtsService : Service(), TextToSpeech.OnInitListener {
         const val ACTION_NEXT = "com.shelfreader.NEXT"
         const val ACTION_PREV = "com.shelfreader.PREV"
         const val ACTION_STOP = "com.shelfreader.STOP"
+        const val ACTION_SEEK = "com.shelfreader.SEEK"
+        const val ACTION_SLEEP = "com.shelfreader.SLEEP"
+        const val ACTION_NOOP = "com.shelfreader.NOOP"
         const val EXTRA_BOOK = "book"
         const val EXTRA_INDEX = "index"
+        const val EXTRA_OFFSET = "offset"
+        const val EXTRA_MINUTES = "minutes"
         private const val CHANNEL = "reading"
         private const val NOTIF_ID = 1
 
@@ -52,13 +60,27 @@ class TtsService : Service(), TextToSpeech.OnInitListener {
     private var title = ""
     private var author = ""
     var paras: List<String> = emptyList(); private set
-    var index = 0; private set
+    var chapters: List<Chapter> = emptyList(); private set
+    private var segs: List<Seg> = emptyList()
+    private var segIndex = 0
     var playing = false; private set
+
+    /** Paragraph currently being read. */
+    val index: Int get() = segs.getOrNull(segIndex)?.para ?: 0
+    fun currentSeg(): Seg? = segs.getOrNull(segIndex)
 
     private var tts: TextToSpeech? = null
     private var ready = false
+    private var speaker: Speaker? = null
     private var gen = 0
     private var queuedUpTo = -1
+    private var lastSpoken = -1
+    private var foreground = false
+    private var lastNotifKey = ""
+
+    private var sleepDeadline = 0L
+    private var sleepAtChapterEnd = false
+
     private val main = Handler(Looper.getMainLooper())
     private lateinit var session: MediaSession
     private var wakeLock: PowerManager.WakeLock? = null
@@ -77,14 +99,25 @@ class TtsService : Service(), TextToSpeech.OnInitListener {
         }
     }
 
-    override fun onBind(intent: Intent?): IBinder? = null
+    private val sleepTick = object : Runnable {
+        override fun run() {
+            if (sleepDeadline == 0L) return
+            if (SystemClock.elapsedRealtime() >= sleepDeadline) {
+                sleepDeadline = 0L
+                if (playing) pause() else update()
+            } else {
+                update()
+                main.postDelayed(this, 15_000)
+            }
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
         instance = this
         audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
-        val nm = getSystemService(NotificationManager::class.java)
-        nm.createNotificationChannel(NotificationChannel(CHANNEL, "Reading aloud", NotificationManager.IMPORTANCE_LOW))
+        getSystemService(NotificationManager::class.java)
+            .createNotificationChannel(NotificationChannel(CHANNEL, "Reading aloud", NotificationManager.IMPORTANCE_LOW))
         session = MediaSession(this, "ShelfReader").apply {
             setCallback(object : MediaSession.Callback() {
                 override fun onPlay() = play()
@@ -92,14 +125,41 @@ class TtsService : Service(), TextToSpeech.OnInitListener {
                 override fun onSkipToNext() = skip(1)
                 override fun onSkipToPrevious() = skip(-1)
                 override fun onStop() = stopAll()
+                override fun onPlayFromMediaId(mediaId: String?, extras: Bundle?) {
+                    if (mediaId == null) return
+                    if (mediaId != bookId && !load(mediaId)) return
+                    play()
+                }
             })
             isActive = true
         }
+        sessionToken = session.sessionToken
         val filter = IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY)
         if (Build.VERSION.SDK_INT >= 33) registerReceiver(noisyReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
         else registerReceiver(noisyReceiver, filter)
         tts = TextToSpeech(this, this)
     }
+
+    // ---------- Android Auto / media browser ----------
+
+    override fun onGetRoot(clientPackageName: String, clientUid: Int, rootHints: Bundle?): MediaBrowserService.BrowserRoot =
+        MediaBrowserService.BrowserRoot("root", null)
+
+    override fun onLoadChildren(parentId: String, result: MediaBrowserService.Result<MutableList<MediaBrowser.MediaItem>>) {
+        val items = Library.load(this).sortedByDescending { it.added }.map { b ->
+            MediaBrowser.MediaItem(
+                MediaDescription.Builder()
+                    .setMediaId(b.id)
+                    .setTitle(b.title)
+                    .setSubtitle("${b.author.ifBlank { "Unknown author" }} · ${Library.percent(this, b)}%")
+                    .build(),
+                MediaBrowser.MediaItem.FLAG_PLAYABLE
+            )
+        }.toMutableList()
+        result.sendResult(items)
+    }
+
+    // ---------- lifecycle ----------
 
     override fun onInit(status: Int) {
         main.post {
@@ -114,57 +174,105 @@ class TtsService : Service(), TextToSpeech.OnInitListener {
             t.setAudioAttributes(attrs)
             t.setOnUtteranceProgressListener(progressListener)
             applySettings(false)
-            if (playing) speakFrom(index)
+            if (playing) speakFrom(segIndex)
         }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val action = intent?.action
-        if (intent != null && action == ACTION_PLAY) {
-            val id = intent.getStringExtra(EXTRA_BOOK)
-            if (id != null && id != bookId) load(id)
-            if (intent.hasExtra(EXTRA_INDEX)) {
-                index = intent.getIntExtra(EXTRA_INDEX, 0).coerceIn(0, maxOf(0, paras.size - 1))
+        val i = intent ?: Intent()
+        val action = i.action
+        when (action) {
+            ACTION_PLAY, ACTION_SEEK -> {
+                val id = i.getStringExtra(EXTRA_BOOK)
+                if (id != null && id != bookId) load(id)
+                if (bookId == null) loadLast()
+                if (i.hasExtra(EXTRA_INDEX) && segs.isNotEmpty()) {
+                    segIndex = segFor(i.getIntExtra(EXTRA_INDEX, 0), i.getIntExtra(EXTRA_OFFSET, 0))
+                    savePos()
+                }
             }
+            ACTION_SLEEP -> {
+                val id = i.getStringExtra(EXTRA_BOOK)
+                if (id != null && bookId == null) load(id)
+            }
+            ACTION_TOGGLE, ACTION_NEXT, ACTION_PREV -> if (bookId == null) loadLast()
         }
         startForegroundCompat()
         when (action) {
             ACTION_PLAY -> play()
+            ACTION_SEEK -> if (playing && ready) speakFrom(segIndex) else update()
             ACTION_TOGGLE -> if (playing) pause() else play()
             ACTION_PAUSE -> pause()
             ACTION_NEXT -> skip(1)
             ACTION_PREV -> skip(-1)
+            ACTION_SLEEP -> setSleep(i.getIntExtra(EXTRA_MINUTES, 0))
             ACTION_STOP -> stopAll()
         }
         if (bookId == null && action != ACTION_STOP) stopAll()
         return START_NOT_STICKY
     }
 
-    private fun load(id: String) {
-        val b = Library.get(this, id) ?: return
+    private fun loadLast(): Boolean = Settings.lastBook(this)?.let { load(it) } ?: false
+
+    private fun load(id: String): Boolean {
+        val b = Library.get(this, id) ?: return false
+        val d = try { Library.doc(this, b) } catch (t: Throwable) { return false }
         gen++
         tts?.stop()
-        paras = try { Library.paragraphs(this, b) } catch (t: Throwable) { emptyList() }
+        paras = d.paras
+        chapters = d.chapters
+        segs = Speech.segments(paras)
         bookId = id
         title = b.title
         author = b.author
-        index = Library.position(this, id).coerceIn(0, maxOf(0, paras.size - 1))
+        Settings.setLastBook(this, id)
+        segIndex = segFor(Library.position(this, id), Library.offset(this, id))
+        lastNotifKey = ""
         session.setMetadata(
             MediaMetadata.Builder()
                 .putString(MediaMetadata.METADATA_KEY_TITLE, title)
                 .putString(MediaMetadata.METADATA_KEY_ARTIST, author)
                 .build()
         )
+        return true
+    }
+
+    /** First sentence of [para] that contains or follows character [off]. */
+    private fun segFor(para: Int, off: Int = 0): Int {
+        if (segs.isEmpty()) return 0
+        var lo = 0
+        var hi = segs.size - 1
+        while (lo < hi) {
+            val mid = (lo + hi) / 2
+            if (segs[mid].para < para) lo = mid + 1 else hi = mid
+        }
+        var k = lo
+        while (k + 1 < segs.size && segs[k].para == para && segs[k + 1].para == para && segs[k].end <= off) k++
+        return k
+    }
+
+    private fun savePos() {
+        val id = bookId ?: return
+        val s = segs.getOrNull(segIndex) ?: return
+        Library.setPosition(this, id, s.para, s.start)
+    }
+
+    fun chapterIndexOf(para: Int): Int {
+        var r = -1
+        for ((k, c) in chapters.withIndex()) { if (c.para <= para) r = k else break }
+        return r
     }
 
     // ---------- playback ----------
 
     fun play() {
-        if (paras.isEmpty()) return
+        if (segs.isEmpty() && !loadLast()) return
+        if (segs.isEmpty()) return
+        ensureForeground()
         playing = true
         if (!requestFocus()) { playing = false; update(); return }
         acquireWake()
-        if (ready) speakFrom(index)
+        if (ready) speakFrom(segIndex)
         update()
     }
 
@@ -176,54 +284,73 @@ class TtsService : Service(), TextToSpeech.OnInitListener {
         update()
     }
 
+    /** Moves by whole paragraphs. "Back" first returns to the start of the current paragraph. */
     fun skip(delta: Int) {
-        if (paras.isEmpty()) return
-        index = (index + delta).coerceIn(0, paras.size - 1)
-        bookId?.let { Library.setPosition(this, it, index) }
-        if (playing && ready) speakFrom(index)
+        if (segs.isEmpty()) return
+        val cur = segs[segIndex]
+        val target = if (delta < 0 && segIndex > 0 && segs[segIndex - 1].para == cur.para) cur.para
+        else (cur.para + delta).coerceIn(0, paras.size - 1)
+        segIndex = segFor(target)
+        savePos()
+        if (playing && ready) speakFrom(segIndex)
         update()
     }
 
     fun stopAll() {
         if (playing) pause()
+        setSleep(0)
         abandonFocus()
         stopForeground(STOP_FOREGROUND_REMOVE)
+        foreground = false
         stopSelf()
     }
 
-    /** Re-reads speed and voice settings; restarts the current paragraph if asked. */
+    /** Re-reads voice, speed, pronunciation and clutter settings; restarts the sentence if asked. */
     fun applySettings(restart: Boolean) {
+        speaker = Speaker(this)
         val t = tts ?: return
         if (!ready) return
         t.setSpeechRate(Settings.rate(this))
         val wanted = Settings.voice(this)
         try {
-            if (wanted != null) {
-                t.voices?.firstOrNull { it.name == wanted }?.let { t.voice = it }
-            } else {
-                t.defaultVoice?.let { t.voice = it }
-            }
+            if (wanted != null) t.voices?.firstOrNull { it.name == wanted }?.let { t.voice = it }
+            else t.defaultVoice?.let { t.voice = it }
         } catch (e: Throwable) { /* some engines throw on voice queries */ }
-        if (restart && playing) speakFrom(index)
+        if (restart && playing) speakFrom(segIndex)
     }
 
     fun engine(): TextToSpeech? = if (ready) tts else null
 
-    private fun speakFrom(i: Int) {
-        val t = tts ?: return
-        if (i >= paras.size) { finished(); return }
-        gen++
-        queuedUpTo = i - 1
-        enqueue(i, TextToSpeech.QUEUE_FLUSH)
-        enqueue(i + 1, TextToSpeech.QUEUE_ADD)
-        enqueue(i + 2, TextToSpeech.QUEUE_ADD)
+    private fun segText(k: Int): String {
+        val s = segs[k]
+        return paras[s.para].substring(s.start, s.end)
     }
 
-    private fun enqueue(i: Int, mode: Int) {
+    private fun speakFrom(si: Int) {
         val t = tts ?: return
-        if (i >= paras.size) return
-        t.speak(paras[i], mode, null, "$gen:$i")
-        if (i > queuedUpTo) queuedUpTo = i
+        gen++
+        t.stop()
+        segIndex = si.coerceIn(0, maxOf(0, segs.size - 1))
+        queuedUpTo = segIndex - 1
+        lastSpoken = -1
+        fill(true)
+    }
+
+    /** Keeps a few sentences queued ahead so there are no gaps between them. */
+    private fun fill(first: Boolean) {
+        val t = tts ?: return
+        val sp = speaker ?: Speaker(this).also { speaker = it }
+        var mode = if (first) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
+        var spoke = false
+        while (queuedUpTo < segs.size - 1 && (queuedUpTo < segIndex + 4 || (first && !spoke))) {
+            val k = ++queuedUpTo
+            val text = sp.spoken(segText(k)) ?: continue
+            t.speak(text, mode, null, "$gen:$k")
+            mode = TextToSpeech.QUEUE_ADD
+            spoke = true
+            lastSpoken = k
+        }
+        if (first && !spoke) finished()
     }
 
     private fun finished() {
@@ -236,28 +363,38 @@ class TtsService : Service(), TextToSpeech.OnInitListener {
         val parts = id?.split(":") ?: return null
         if (parts.size != 2) return null
         val g = parts[0].toIntOrNull() ?: return null
-        val i = parts[1].toIntOrNull() ?: return null
-        return g to i
+        val k = parts[1].toIntOrNull() ?: return null
+        return g to k
     }
 
     private val progressListener = object : UtteranceProgressListener() {
         override fun onStart(utteranceId: String?) {
             main.post {
-                val (g, i) = parse(utteranceId) ?: return@post
+                val (g, k) = parse(utteranceId) ?: return@post
                 if (g != gen) return@post
-                index = i
-                bookId?.let { Library.setPosition(this@TtsService, it, i) }
-                while (queuedUpTo < i + 2 && queuedUpTo + 1 < paras.size) enqueue(queuedUpTo + 1, TextToSpeech.QUEUE_ADD)
+                segIndex = k
+                savePos()
+                fill(false)
                 update()
             }
         }
 
         override fun onDone(utteranceId: String?) {
             main.post {
-                val (g, i) = parse(utteranceId) ?: return@post
+                val (g, k) = parse(utteranceId) ?: return@post
                 if (g != gen) return@post
-                if (i >= paras.size - 1) {
-                    index = paras.size - 1
+                val next = k + 1
+                if (sleepAtChapterEnd && next < segs.size &&
+                    chapterIndexOf(segs[next].para) != chapterIndexOf(segs[k].para)
+                ) {
+                    sleepAtChapterEnd = false
+                    segIndex = next
+                    savePos()
+                    pause()
+                    return@post
+                }
+                if (k == lastSpoken && queuedUpTo >= segs.size - 1) {
+                    segIndex = k
                     finished()
                 }
             }
@@ -270,11 +407,36 @@ class TtsService : Service(), TextToSpeech.OnInitListener {
 
         private fun handleError(utteranceId: String?) {
             main.post {
-                val (g, i) = parse(utteranceId) ?: return@post
+                val (g, k) = parse(utteranceId) ?: return@post
                 if (g != gen || !playing) return@post
-                if (i + 1 < paras.size) { index = i + 1; speakFrom(index) } else finished()
+                if (k + 1 < segs.size) speakFrom(k + 1) else finished()
             }
         }
+    }
+
+    // ---------- sleep timer ----------
+
+    /** minutes > 0: stop after that long; -1: at end of chapter; 0: off. */
+    fun setSleep(minutes: Int) {
+        main.removeCallbacks(sleepTick)
+        sleepDeadline = 0L
+        sleepAtChapterEnd = false
+        if (minutes > 0) {
+            sleepDeadline = SystemClock.elapsedRealtime() + minutes * 60_000L
+            main.postDelayed(sleepTick, 15_000)
+        } else if (minutes < 0) {
+            sleepAtChapterEnd = true
+        }
+        update()
+    }
+
+    fun sleepText(): String? = when {
+        sleepAtChapterEnd -> "sleep at chapter end"
+        sleepDeadline > 0L -> {
+            val left = ((sleepDeadline - SystemClock.elapsedRealtime()) / 60_000L + 1).coerceAtLeast(1)
+            "sleep in $left min"
+        }
+        else -> null
     }
 
     // ---------- audio focus / wake lock ----------
@@ -311,30 +473,54 @@ class TtsService : Service(), TextToSpeech.OnInitListener {
         if (wakeLock?.isHeld == true) wakeLock?.release()
     }
 
-    // ---------- notification ----------
+    // ---------- notification / widget ----------
+
+    private fun ensureForeground() {
+        if (foreground) return
+        try {
+            startForegroundService(Intent(this, TtsService::class.java).setAction(ACTION_NOOP))
+        } catch (t: Throwable) { /* not allowed right now; playback still works while bound */ }
+    }
+
+    private fun statusLine(): String {
+        val pct = if (paras.isNotEmpty()) (index + 1) * 100 / paras.size else 0
+        val ch = chapterIndexOf(index).let { if (it >= 0) chapters[it].title else null }
+        val parts = ArrayList<String>()
+        parts += if (playing) "Reading" else "Paused"
+        if (ch != null) parts += ch
+        parts += "$pct%"
+        sleepText()?.let { parts += it }
+        return parts.joinToString(" · ")
+    }
 
     private fun update() {
         val actions = PlaybackState.ACTION_PLAY or PlaybackState.ACTION_PAUSE or PlaybackState.ACTION_PLAY_PAUSE or
-            PlaybackState.ACTION_SKIP_TO_NEXT or PlaybackState.ACTION_SKIP_TO_PREVIOUS or PlaybackState.ACTION_STOP
+            PlaybackState.ACTION_SKIP_TO_NEXT or PlaybackState.ACTION_SKIP_TO_PREVIOUS or PlaybackState.ACTION_STOP or
+            PlaybackState.ACTION_PLAY_FROM_MEDIA_ID
         session.setPlaybackState(
             PlaybackState.Builder()
                 .setActions(actions)
                 .setState(if (playing) PlaybackState.STATE_PLAYING else PlaybackState.STATE_PAUSED, index.toLong(), 1f)
                 .build()
         )
-        if (bookId != null) {
-            getSystemService(NotificationManager::class.java).notify(NOTIF_ID, buildNotification())
+        val line = statusLine()
+        val key = "$bookId|$line"
+        if (key != lastNotifKey && bookId != null) {
+            lastNotifKey = key
+            if (foreground) getSystemService(NotificationManager::class.java).notify(NOTIF_ID, buildNotification(line))
+            ShelfWidget.push(this, title, line, playing)
         }
         listener?.invoke()
     }
 
     private fun startForegroundCompat() {
-        val n = buildNotification()
+        val n = buildNotification(statusLine())
         if (Build.VERSION.SDK_INT >= 29) startForeground(NOTIF_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
         else startForeground(NOTIF_ID, n)
+        foreground = true
     }
 
-    private fun buildNotification(): Notification {
+    private fun buildNotification(line: String): Notification {
         val flags = PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         val open = PendingIntent.getActivity(
             this, 0,
@@ -346,11 +532,10 @@ class TtsService : Service(), TextToSpeech.OnInitListener {
             PendingIntent.getService(this, code, Intent(this, TtsService::class.java).setAction(act), flags)
         ).build()
 
-        val pct = if (paras.isNotEmpty()) (index + 1) * 100 / paras.size else 0
         return Notification.Builder(this, CHANNEL)
             .setSmallIcon(R.drawable.ic_notif)
             .setContentTitle(title.ifBlank { "Shelf Reader" })
-            .setContentText((if (playing) "Reading" else "Paused") + " · $pct%")
+            .setContentText(line)
             .setContentIntent(open)
             .setOngoing(playing)
             .setVisibility(Notification.VISIBILITY_PUBLIC)
@@ -368,6 +553,7 @@ class TtsService : Service(), TextToSpeech.OnInitListener {
     override fun onDestroy() {
         instance = null
         gen++
+        main.removeCallbacks(sleepTick)
         try { unregisterReceiver(noisyReceiver) } catch (e: Throwable) {}
         tts?.stop()
         tts?.shutdown()
@@ -375,7 +561,9 @@ class TtsService : Service(), TextToSpeech.OnInitListener {
         session.release()
         releaseWake()
         abandonFocus()
+        val wasBook = bookId != null
         playing = false
+        if (wasBook) ShelfWidget.push(this, title, "Paused", false)
         listener?.invoke()
         super.onDestroy()
     }
