@@ -9,26 +9,68 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.OpenableColumns
+import android.content.Context
+import android.graphics.Color
+import android.graphics.drawable.ColorDrawable
+import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
+import android.view.ViewGroup
+import android.view.ViewOutlineProvider
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
+import android.widget.AdapterView
+import android.widget.BaseAdapter
 import android.widget.Button
 import android.widget.EditText
 import android.widget.FrameLayout
+import android.widget.GridView
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ListView
+import android.widget.ProgressBar
 import android.widget.TextView
 import java.io.File
 import java.util.concurrent.Executors
 
+/** An ImageView that is always 2:3, like a book cover. */
+private class CoverImage(ctx: Context) : ImageView(ctx) {
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+        setMeasuredDimension(measuredWidth, (measuredWidth * 1.5f).toInt())
+    }
+}
+
+private class Cell(
+    val shelf: Boolean,
+    val root: View,
+    val img: ImageView,
+    val bar: ProgressBar,
+    val badge: TextView,
+    val title: TextView?,
+    val sub: TextView?
+)
+
 class MainActivity : Activity() {
+
+    companion object {
+        private val VIEW_NAMES = listOf("Shelf", "Grid", "List")
+        private val SORT_NAMES = listOf("Recent", "Title", "Author", "Progress")
+        private const val WOOD_BG = 0xFF2B1D14.toInt()
+    }
 
     private lateinit var libraryPane: View
     private lateinit var libraryList: ListView
+    private lateinit var libraryGrid: GridView
     private lateinit var libraryEmpty: TextView
+    private lateinit var continueBar: View
+    private lateinit var continueText: TextView
+    private lateinit var viewBtn: Button
+    private lateinit var sortBtn: Button
+    private var shelfAdapter: ShelfAdapter? = null
+    private var pendingCoverBook: String? = null
     private lateinit var searchPane: View
     private lateinit var searchBox: EditText
     private lateinit var searchStatus: TextView
@@ -66,8 +108,59 @@ class MainActivity : Activity() {
         }
         root.addView(tabs)
 
-        // Library pane
-        val lib = FrameLayout(this)
+        // Library pane: continue bar, view/sort bar, then shelf/grid/list
+        val lib = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+
+        continueText = TextView(this).apply {
+            textSize = 15f
+            maxLines = 2
+            setPadding(dp(16), dp(10), dp(8), dp(10))
+        }
+        val continuePlay = Button(this).apply { text = "▶ Play" }
+        continueBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setBackgroundColor(0x2266AAFF)
+            addView(continueText, LinearLayout.LayoutParams(0, WRAP, 1f))
+            addView(continuePlay)
+        }
+        continueText.setOnClickListener { Settings.lastBook(this)?.let { id -> Library.get(this, id)?.let { openBook(it) } } }
+        continuePlay.setOnClickListener {
+            Settings.lastBook(this)?.let { id ->
+                startForegroundService(
+                    Intent(this, TtsService::class.java).setAction(TtsService.ACTION_PLAY).putExtra(TtsService.EXTRA_BOOK, id)
+                )
+                toast("Reading aloud. Controls are in your notifications.")
+            }
+        }
+        lib.addView(continueBar)
+
+        val bar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        viewBtn = Button(this).apply {
+            setOnClickListener {
+                AlertDialog.Builder(this@MainActivity).setTitle("Library view")
+                    .setItems(VIEW_NAMES.toTypedArray()) { _, w -> Settings.setLibraryView(this@MainActivity, w); refreshLibrary() }
+                    .show()
+            }
+        }
+        sortBtn = Button(this).apply {
+            setOnClickListener {
+                AlertDialog.Builder(this@MainActivity).setTitle("Sort by")
+                    .setItems(SORT_NAMES.toTypedArray()) { _, w -> Settings.setLibrarySort(this@MainActivity, w); refreshLibrary() }
+                    .show()
+            }
+        }
+        bar.addView(viewBtn, LinearLayout.LayoutParams(0, WRAP, 1f))
+        bar.addView(sortBtn, LinearLayout.LayoutParams(0, WRAP, 1f))
+        lib.addView(bar)
+
+        val holder = FrameLayout(this)
+        libraryGrid = GridView(this).apply {
+            numColumns = GridView.AUTO_FIT
+            columnWidth = dp(112)
+            stretchMode = GridView.STRETCH_COLUMN_WIDTH
+            clipToPadding = false
+        }
         libraryList = ListView(this)
         libraryEmpty = TextView(this).apply {
             text = "No books yet.\n\nTap “Find books” to search Project Gutenberg, Standard Ebooks, the Internet Archive, " +
@@ -76,8 +169,10 @@ class MainActivity : Activity() {
             textSize = 16f
             setPadding(dp(32), dp(32), dp(32), dp(32))
         }
-        lib.addView(libraryList, FrameLayout.LayoutParams(MATCH, MATCH))
-        lib.addView(libraryEmpty, FrameLayout.LayoutParams(MATCH, MATCH))
+        holder.addView(libraryGrid, FrameLayout.LayoutParams(MATCH, MATCH))
+        holder.addView(libraryList, FrameLayout.LayoutParams(MATCH, MATCH))
+        holder.addView(libraryEmpty, FrameLayout.LayoutParams(MATCH, MATCH))
+        lib.addView(holder, LinearLayout.LayoutParams(MATCH, 0, 1f))
         libraryPane = lib
 
         // Search pane
@@ -115,8 +210,12 @@ class MainActivity : Activity() {
         root.addView(content, LinearLayout.LayoutParams(MATCH, 0, 1f))
         setContentView(root)
 
-        libraryList.setOnItemClickListener { _, _, pos, _ -> openBook(books[pos]) }
-        libraryList.setOnItemLongClickListener { _, _, pos, _ -> confirmDelete(books[pos]); true }
+        val open = AdapterView.OnItemClickListener { _, _, pos, _ -> openBook(books[pos]) }
+        val menu = AdapterView.OnItemLongClickListener { _, _, pos, _ -> bookMenu(books[pos]); true }
+        libraryList.onItemClickListener = open
+        libraryList.onItemLongClickListener = menu
+        libraryGrid.onItemClickListener = open
+        libraryGrid.onItemLongClickListener = menu
         resultsList.setOnItemClickListener { _, _, pos, _ -> confirmDownload(results[pos]) }
 
         if (Build.VERSION.SDK_INT >= 33 &&
@@ -168,16 +267,189 @@ class MainActivity : Activity() {
         if (search) searchBox.requestFocus() else refreshLibrary()
     }
 
+    private fun sortKey(s: String) = s.lowercase().replace(Regex("^(the|a|an)\\s+"), "")
+
     private fun refreshLibrary() {
-        books = Library.load(this).sortedByDescending { it.added }
+        val all = Library.load(this)
+        books = when (Settings.librarySort(this)) {
+            1 -> all.sortedBy { sortKey(it.title) }
+            2 -> all.sortedWith(compareBy({ sortKey(it.author.substringAfterLast(' ').ifBlank { "~" }) }, { sortKey(it.title) }))
+            3 -> all.sortedByDescending { Library.percent(this, it) }
+            else -> all.sortedByDescending { maxOf(Library.opened(this, it.id), it.added) }
+        }
+        val mode = Settings.libraryView(this).coerceIn(0, 2)
+        viewBtn.text = "View: ${VIEW_NAMES[mode]}"
+        sortBtn.text = "Sort: ${SORT_NAMES[Settings.librarySort(this).coerceIn(0, 3)]}"
         libraryEmpty.visibility = if (books.isEmpty()) View.VISIBLE else View.GONE
-        libraryList.adapter = TwoLineAdapter(this, books.map {
-            it.title to "${it.author.ifBlank { "Unknown author" }} · ${it.format.uppercase()} · ${Library.percent(this, it)}% read"
-        })
+
+        if (mode == 2) {
+            libraryGrid.visibility = View.GONE
+            libraryList.visibility = View.VISIBLE
+            libraryList.adapter = TwoLineAdapter(this, books.map {
+                it.title to "${it.author.ifBlank { "Unknown author" }} · ${it.format.uppercase()} · ${Library.percent(this, it)}% read"
+            })
+        } else {
+            val shelf = mode == 0
+            libraryList.visibility = View.GONE
+            libraryGrid.visibility = View.VISIBLE
+            libraryGrid.setBackgroundColor(if (shelf) WOOD_BG else Color.TRANSPARENT)
+            libraryGrid.horizontalSpacing = if (shelf) 0 else dp(10)
+            libraryGrid.verticalSpacing = if (shelf) 0 else dp(14)
+            libraryGrid.setPadding(if (shelf) 0 else dp(10), dp(if (shelf) 0 else 10), if (shelf) 0 else dp(10), dp(16))
+            val a = ShelfAdapter(shelf)
+            shelfAdapter = a
+            libraryGrid.adapter = a
+        }
+
+        // "Continue" bar for the last book you were reading
+        val last = Settings.lastBook(this)?.let { id -> all.firstOrNull { it.id == id } }
+        continueBar.visibility = if (last != null) View.VISIBLE else View.GONE
+        if (last != null) continueText.text = "Continue “${last.title}” · ${Library.percent(this, last)}%"
     }
 
     private fun openBook(b: Book) {
         startActivity(Intent(this, ReaderActivity::class.java).putExtra("book", b.id))
+    }
+
+    // ---------- shelf / grid ----------
+
+    private inner class ShelfAdapter(private val shelf: Boolean) : BaseAdapter() {
+        override fun getCount() = books.size
+        override fun getItem(position: Int): Any = books[position]
+        override fun getItemId(position: Int) = position.toLong()
+
+        override fun getView(position: Int, convertView: View?, parent: ViewGroup?): View {
+            val cell = (convertView?.tag as? Cell)?.takeIf { it.shelf == shelf } ?: makeCell(shelf)
+            val b = books[position]
+            val bmp = Covers.get(this@MainActivity, b) { libraryGrid.invalidateViews() }
+            if (bmp != null) cell.img.setImageBitmap(bmp) else cell.img.setImageDrawable(ColorDrawable(Covers.color(b)))
+            val pct = Library.percent(this@MainActivity, b)
+            cell.bar.progress = pct
+            cell.bar.visibility = if (pct > 0) View.VISIBLE else View.INVISIBLE
+            cell.badge.visibility = if (TtsService.instance?.let { it.bookId == b.id && it.playing } == true) View.VISIBLE else View.GONE
+            cell.title?.text = b.title
+            cell.sub?.text = if (pct > 0) "$pct% · ${b.author.ifBlank { "Unknown" }}" else b.author.ifBlank { "Unknown author" }
+            return cell.root
+        }
+    }
+
+    private fun makeCell(shelf: Boolean): Cell {
+        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val frame = FrameLayout(this).apply {
+            if (shelf) setPadding(dp(9), dp(18), dp(9), 0) else setPadding(0, 0, 0, 0)
+            clipToPadding = false
+        }
+        val coverBg = GradientDrawable().apply { setColor(Color.DKGRAY); cornerRadius = dp(3).toFloat() }
+        val img = CoverImage(this).apply {
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            background = coverBg
+            outlineProvider = ViewOutlineProvider.BACKGROUND
+            clipToOutline = true
+            elevation = dp(5).toFloat()
+        }
+        frame.addView(img, FrameLayout.LayoutParams(MATCH, WRAP))
+        val bar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            max = 100
+            elevation = dp(6).toFloat()
+        }
+        frame.addView(bar, FrameLayout.LayoutParams(MATCH, dp(5), Gravity.BOTTOM))
+        val badge = TextView(this).apply {
+            text = "▶"
+            textSize = 12f
+            setTextColor(Color.WHITE)
+            setPadding(dp(6), dp(2), dp(6), dp(2))
+            background = GradientDrawable().apply { setColor(0xCC2E5E4E.toInt()); cornerRadius = dp(8).toFloat() }
+            elevation = dp(7).toFloat()
+        }
+        frame.addView(badge, FrameLayout.LayoutParams(WRAP, WRAP, Gravity.TOP or Gravity.END).apply { setMargins(0, dp(4), dp(4), 0) })
+        root.addView(frame)
+
+        var title: TextView? = null
+        var sub: TextView? = null
+        if (shelf) {
+            val plank = View(this).apply {
+                background = GradientDrawable(
+                    GradientDrawable.Orientation.TOP_BOTTOM,
+                    intArrayOf(0xFFA87449.toInt(), 0xFF7A4E2D.toInt(), 0xFF4A2E19.toInt())
+                )
+            }
+            root.addView(plank, LinearLayout.LayoutParams(MATCH, dp(14)))
+            val shadow = View(this).apply {
+                background = GradientDrawable(
+                    GradientDrawable.Orientation.TOP_BOTTOM,
+                    intArrayOf(0x88000000.toInt(), 0x00000000)
+                )
+            }
+            root.addView(shadow, LinearLayout.LayoutParams(MATCH, dp(8)))
+        } else {
+            title = TextView(this).apply {
+                textSize = 13f
+                maxLines = 2
+                setTypeface(typeface, android.graphics.Typeface.BOLD)
+                setPadding(0, dp(6), 0, 0)
+            }
+            sub = TextView(this).apply {
+                textSize = 11f
+                maxLines = 1
+                alpha = 0.7f
+            }
+            root.addView(title)
+            root.addView(sub)
+        }
+        val cell = Cell(shelf, root, img, bar, badge, title, sub)
+        root.tag = cell
+        return cell
+    }
+
+    // ---------- per-book actions ----------
+
+    private fun bookMenu(b: Book) {
+        val items = arrayOf("Open", "Read aloud now", "Edit title & author", "Change cover…", "Reset cover", "Remove from library")
+        AlertDialog.Builder(this).setTitle(b.title).setItems(items) { _, w ->
+            when (w) {
+                0 -> openBook(b)
+                1 -> {
+                    startForegroundService(
+                        Intent(this, TtsService::class.java).setAction(TtsService.ACTION_PLAY).putExtra(TtsService.EXTRA_BOOK, b.id)
+                    )
+                    toast("Reading “${b.title}” aloud")
+                }
+                2 -> editBook(b)
+                3 -> {
+                    pendingCoverBook = b.id
+                    try {
+                        @Suppress("DEPRECATION")
+                        startActivityForResult(
+                            Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("image/*"), 44
+                        )
+                    } catch (e: Throwable) { toast("No picture picker available") }
+                }
+                4 -> { Covers.reset(this, b); refreshLibrary() }
+                5 -> confirmDelete(b)
+            }
+        }.show()
+    }
+
+    private fun editBook(b: Book) {
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), 0)
+        }
+        val t = EditText(this).apply { hint = "Title"; setText(b.title) }
+        val a = EditText(this).apply { hint = "Author"; setText(b.author) }
+        box.addView(t)
+        box.addView(a)
+        AlertDialog.Builder(this)
+            .setTitle("Edit book")
+            .setView(box)
+            .setPositiveButton("Save") { _, _ ->
+                val nb = b.copy(title = t.text.toString().trim().ifEmpty { b.title }, author = a.text.toString().trim())
+                Library.update(this, nb)
+                Covers.invalidate(b.id)
+                refreshLibrary()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     private fun confirmDelete(b: Book) {
@@ -333,6 +605,10 @@ class MainActivity : Activity() {
                 }
                 val book = Book(id, title, author, file.name, fmt, System.currentTimeMillis())
                 Library.doc(this, book) // extract now so problems show up here
+                r.cover?.let {
+                    runOnUiThread { searchStatus.text = "Getting the cover…" }
+                    Covers.fetch(this, id, it)
+                }
                 Library.add(this, book)
                 runOnUiThread {
                     busy = false
@@ -370,6 +646,14 @@ class MainActivity : Activity() {
         @Suppress("DEPRECATION")
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == 42 && resultCode == RESULT_OK) data?.data?.let { importUri(it) }
+        if (requestCode == 44 && resultCode == RESULT_OK) {
+            val uri = data?.data ?: return
+            val b = pendingCoverBook?.let { Library.get(this, it) } ?: return
+            pool.execute {
+                val ok = try { Covers.setFromUri(this, b, uri) } catch (t: Throwable) { false }
+                runOnUiThread { if (ok) refreshLibrary() else toast("Couldn't use that picture.") }
+            }
+        }
     }
 
     private fun importUri(uri: Uri) {

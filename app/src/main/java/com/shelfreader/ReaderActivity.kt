@@ -95,6 +95,7 @@ class ReaderActivity : Activity() {
         if (b == null) { finish(); return }
         book = b
         title = b.title
+        Library.markOpened(this, b.id)
         loadAppearance()
 
         root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }

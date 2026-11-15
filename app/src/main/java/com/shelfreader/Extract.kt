@@ -69,6 +69,34 @@ object Extract {
         null to null
     }
 
+    /** Raw bytes of the EPUB's cover image, if it declares one. */
+    fun epubCover(file: File): ByteArray? {
+        try {
+            ZipFile(file).use { z ->
+                val e = Epub(z)
+                val base = dirOf(e.opfPath)
+                val items = Regex("<(?:\\w+:)?item\\b[^>]*>", RegexOption.IGNORE_CASE).findAll(e.opf).map { it.value }.toList()
+                fun isImage(tag: String) = (attr(tag, "media-type") ?: "").startsWith("image")
+                var tag: String? = items.firstOrNull { (attr(it, "properties") ?: "").split(' ').contains("cover-image") }
+                if (tag == null) {
+                    val coverId = Regex("<meta\\b[^>]*>", RegexOption.IGNORE_CASE).findAll(e.opf).map { it.value }
+                        .firstOrNull { attr(it, "name") == "cover" }?.let { attr(it, "content") }
+                    if (coverId != null) tag = items.firstOrNull { attr(it, "id") == coverId }
+                }
+                if (tag == null || !isImage(tag)) {
+                    tag = items.firstOrNull {
+                        isImage(it) && ((attr(it, "id") ?: "") + " " + (attr(it, "href") ?: "")).contains("cover", true)
+                    } ?: tag
+                }
+                val href = tag?.let { attr(it, "href") } ?: return null
+                val entry = z.getEntry(resolvePath(base, decode(href))) ?: return null
+                return z.getInputStream(entry).use { it.readBytes() }
+            }
+        } catch (t: Throwable) {
+            return null
+        }
+    }
+
     private fun clean(s: String) = decodeEntities(s.replace(Regex("<[^>]*>"), " ")).replace(Regex("\\s+"), " ").trim()
 
     private fun decode(s: String): String = try { URLDecoder.decode(s.replace("+", "%2B"), "UTF-8") } catch (t: Throwable) { s }

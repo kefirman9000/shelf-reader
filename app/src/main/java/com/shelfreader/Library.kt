@@ -62,13 +62,21 @@ object Library {
     fun remove(ctx: Context, b: Book) {
         save(ctx, load(ctx).filter { it.id != b.id })
         val d = dir(ctx)
-        for (name in listOf(b.file, "${b.id}.paras", "${b.id}.v2.paras", "${b.id}.v2.chap", "${b.id}.notes.json")) {
+        for (name in listOf(b.file, "${b.id}.paras", "${b.id}.v2.paras", "${b.id}.v2.chap", "${b.id}.notes.json", "${b.id}.cover.jpg")) {
             File(d, name).delete()
         }
-        prefs(ctx).edit().remove("pos_${b.id}").remove("off_${b.id}").remove("len_${b.id}").apply()
+        prefs(ctx).edit().remove("pos_${b.id}").remove("off_${b.id}").remove("len_${b.id}").remove("opened_${b.id}").apply()
     }
 
     fun get(ctx: Context, id: String): Book? = load(ctx).firstOrNull { it.id == id }
+
+    @Synchronized
+    fun update(ctx: Context, b: Book) {
+        save(ctx, load(ctx).map { if (it.id == b.id) b else it })
+    }
+
+    fun markOpened(ctx: Context, id: String) = prefs(ctx).edit().putLong("opened_$id", System.currentTimeMillis()).apply()
+    fun opened(ctx: Context, id: String) = prefs(ctx).getLong("opened_$id", 0L)
 
     /** Paragraphs + chapters, extracted once and cached. Slow the first time — call off the main thread. */
     fun doc(ctx: Context, b: Book): Doc {
@@ -152,6 +160,11 @@ object Settings {
 
     fun skipClutter(ctx: Context) = p(ctx).getBoolean("skipClutter", true)
     fun setSkipClutter(ctx: Context, v: Boolean) = p(ctx).edit().putBoolean("skipClutter", v).apply()
+
+    fun libraryView(ctx: Context) = p(ctx).getInt("libraryView", 0)
+    fun setLibraryView(ctx: Context, v: Int) = p(ctx).edit().putInt("libraryView", v).apply()
+    fun librarySort(ctx: Context) = p(ctx).getInt("librarySort", 0)
+    fun setLibrarySort(ctx: Context, v: Int) = p(ctx).edit().putInt("librarySort", v).apply()
 
     fun lastBook(ctx: Context): String? = p(ctx).getString("lastBook", null)
     fun setLastBook(ctx: Context, id: String) = p(ctx).edit().putString("lastBook", id).apply()

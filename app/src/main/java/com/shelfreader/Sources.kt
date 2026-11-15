@@ -9,7 +9,8 @@ data class SearchResult(
     val author: String,
     val url: String? = null,      // direct download (Gutenberg)
     val format: String? = null,   // epub / txt / pdf when url is set
-    val iaId: String? = null      // Internet Archive identifier, resolved at download time
+    val iaId: String? = null,     // Internet Archive identifier, resolved at download time
+    val cover: String? = null     // cover image URL, if the source has one
 )
 
 /**
@@ -44,7 +45,8 @@ object Sources {
             if (authors != null) for (a in 0 until authors.length()) {
                 names += prettyName(authors.getJSONObject(a).optString("name"))
             }
-            out += SearchResult("Gutenberg", b.optString("title"), names.joinToString(", "), url, fmt)
+            val cover = formats.optString("image/jpeg").ifEmpty { null }
+            out += SearchResult("Gutenberg", b.optString("title"), names.joinToString(", "), url, fmt, cover = cover)
         }
         return out
     }
@@ -62,14 +64,15 @@ object Sources {
             val d = docs.getJSONObject(i)
             val id = d.optString("identifier")
             if (id.isEmpty()) continue
-            out += SearchResult("Internet Archive", strOrArr(d, "title").ifBlank { id }, strOrArr(d, "creator"), iaId = id)
+            out += SearchResult("Internet Archive", strOrArr(d, "title").ifBlank { id }, strOrArr(d, "creator"), iaId = id,
+                cover = "https://archive.org/services/img/" + Net.encPath(id))
         }
         return out
     }
 
     fun openLibrary(q: String): List<SearchResult> {
         val url = "https://openlibrary.org/search.json?q=" + Net.enc(q) +
-            "&has_fulltext=true&ebook_access=public&fields=key,title,author_name,ia,ebook_access&limit=40"
+            "&has_fulltext=true&ebook_access=public&fields=key,title,author_name,ia,ebook_access,cover_i&limit=40"
         val j = JSONObject(Net.get(url))
         val docs = j.optJSONArray("docs") ?: return emptyList()
         val out = ArrayList<SearchResult>()
@@ -79,7 +82,10 @@ object Sources {
             if (access.isNotEmpty() && access != "public") continue
             val ia = d.optJSONArray("ia") ?: continue
             if (ia.length() == 0) continue
-            out += SearchResult("Open Library", d.optString("title"), strOrArr(d, "author_name"), iaId = ia.getString(0))
+            val coverId = d.optLong("cover_i", 0L)
+            val cover = if (coverId > 0) "https://covers.openlibrary.org/b/id/$coverId-L.jpg"
+                else "https://archive.org/services/img/" + Net.encPath(ia.getString(0))
+            out += SearchResult("Open Library", d.optString("title"), strOrArr(d, "author_name"), iaId = ia.getString(0), cover = cover)
         }
         return out
     }
