@@ -74,8 +74,11 @@
 
       <div class="sample-row">
         <label class="field grow"><span>Sample text</span><textarea id="sampleText" rows="2"></textarea></label>
+        <label class="field style"><span>Reading style</span><select id="readStyle"></select></label>
         <label class="field speed"><span>Speed <b id="speedVal">1.0×</b></span><input type="range" id="speed" min="0.6" max="1.6" step="0.05" value="1"></label>
       </div>
+
+      <div id="styleNote" class="muted small style-note"></div>
 
       <div id="kokoroOpts" class="eng-opts">
         <label class="field inline"><span>Engine</span>
@@ -111,7 +114,7 @@
           <label class="check"><input type="checkbox" id="cloudRemember"> Remember the key on this device</label>
           <span class="muted">Your key is only sent to that service. Premium voices are billed by the service per character.</span>
         </div>
-        <label class="field" id="openaiStyleF"><span>Narration style (OpenAI only)</span><input id="openaiStyle" placeholder="e.g. Warm, calm audiobook narrator with natural pauses"></label>
+        <label class="field" id="openaiStyleF"><span>Your own narration directions (OpenAI only; replaces the reading style's)</span><input id="openaiStyle" placeholder="e.g. A wry, dry British narrator who sounds slightly amused"></label>
       </div>
 
       <div id="voices" class="voices"></div>

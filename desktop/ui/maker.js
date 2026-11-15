@@ -308,7 +308,7 @@ function drawChapters() {
       <input type="checkbox" ${c.on ? 'checked' : ''} aria-label="Include">
       <span class="st" title=""></span>
       <input type="text" value="${esc(c.title)}" aria-label="Chapter title">
-      <span class="len">${fmtDur(c.chars / 5 / WPM * 60 / speed())}</span>
+      <span class="len">${fmtDur(c.chars / 5 / WPM * 60 / effSpeed())}</span>
     </li>`).join('');
   list.querySelectorAll('li').forEach((li) => {
     const c = M.book.chapters[+li.dataset.i];
@@ -389,6 +389,25 @@ const ENG_NOTES = {
 };
 
 const speed = () => +$('#speed').value;
+
+/** Narrator style presets: pace, pauses, and how premium voices perform. */
+const STYLES = {
+  natural: { name: 'Natural', note: 'Clear, warm storytelling.', speed: 1, para: 1, chap: 1, scene: 1, dlg: 1,
+    openai: 'Read like a skilled audiobook narrator: natural, warm and clear, with gentle variation in pace and tone.', el: { stability: 0.5, style: 0.15 }, azure: 'narration-professional', pitch: 0 },
+  bedtime: { name: 'Cozy bedtime', note: 'Slower and softer, with relaxed pauses.', speed: 0.92, para: 1.35, chap: 1.4, scene: 1.3, dlg: 1.15,
+    openai: 'Read softly and soothingly, like a bedtime story: unhurried, warm and gentle, with relaxed pauses.', el: { stability: 0.75, style: 0.05 }, azure: 'narration-relaxed', pitch: -1.5 },
+  thriller: { name: 'Suspense / thriller', note: 'Tighter pace, tense delivery, quick dialogue, long pauses at scene breaks.', speed: 1.04, para: 0.85, chap: 1.1, scene: 1.6, dlg: 0.7,
+    openai: 'Read with quiet intensity and suspense: tight pacing, tension in the voice, and a dramatic beat before reveals.', el: { stability: 0.35, style: 0.45 }, azure: 'narration-professional', pitch: -0.5 },
+  nonfiction: { name: 'Nonfiction / lecture', note: 'Even, confident and articulate.', speed: 1, para: 1.1, chap: 1.25, scene: 1, dlg: 1,
+    openai: 'Read like a clear, confident nonfiction narrator: measured and articulate, engaged, lightly emphasizing key ideas.', el: { stability: 0.65, style: 0.1 }, azure: 'narration-professional', pitch: 0 },
+  children: { name: "Children's story", note: 'Bright and expressive, a little slower.', speed: 0.94, para: 1.2, chap: 1.3, scene: 1.2, dlg: 1,
+    openai: "Read like a lively children's storyteller: bright, expressive and playful, with clear words and fun character voices.", el: { stability: 0.3, style: 0.6 }, azure: 'cheerful', pitch: 1 },
+  dramatic: { name: 'Dramatic / epic', note: 'Rich and theatrical, with weighty pauses.', speed: 0.97, para: 1.2, chap: 1.5, scene: 1.8, dlg: 1,
+    openai: 'Read like a dramatic narrator of an epic tale: rich and resonant, with bold emotion and weighty pauses.', el: { stability: 0.3, style: 0.55 }, azure: 'narration-professional', pitch: -1 }
+};
+const style = () => STYLES[$('#readStyle')?.value] || STYLES.natural;
+/** The speed actually sent to the voice: your setting × the style's pace. */
+const effSpeed = () => speed() * style().speed;
 
 // ----- Kokoro worker -----
 const K = { worker: null, ready: false, loading: null, pending: new Map(), next: 1, gen: 0 };
@@ -506,22 +525,27 @@ async function cloudVoices(p) {
   return [];
 }
 const xmlEsc = (s) => s.replace(/[<>&'"]/g, (ch) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' }[ch]));
-async function cloudSynth(p, voice, text, sp) {
+async function cloudSynth(p, voice, text, sp, ctx = {}) {
   const c = cloudCfg(p);
   if (!c.key) throw new Error(`Add your ${CLOUD[p].name} key first.`);
   let buf;
   if (p === 'openai') {
     const body = { model: 'gpt-4o-mini-tts', voice, input: text, response_format: 'mp3', speed: Math.max(0.25, Math.min(4, sp)) };
-    const style = $('#openaiStyle').value.trim(); if (style) body.instructions = style;
+    body.instructions = openaiInstructions(ctx);
     buf = await (await req('https://api.openai.com/v1/audio/speech', { method: 'POST', headers: { Authorization: 'Bearer ' + c.key, 'Content-Type': 'application/json' }, body: JSON.stringify(body) })).arrayBuffer();
   } else if (p === 'elevenlabs') {
     buf = await (await req(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voice)}?output_format=mp3_44100_128`, {
       method: 'POST', headers: { 'xi-api-key': c.key, 'Content-Type': 'application/json', Accept: 'audio/mpeg' },
-      body: JSON.stringify({ text, model_id: 'eleven_multilingual_v2', voice_settings: { stability: 0.5, similarity_boost: 0.75, speed: Math.max(0.7, Math.min(1.2, sp)) } })
+      body: JSON.stringify({
+        text, model_id: 'eleven_multilingual_v2',
+        // the text just before and after helps the voice carry on in the same tone
+        ...(ctx.prev ? { previous_text: ctx.prev } : {}), ...(ctx.next ? { next_text: ctx.next } : {}),
+        voice_settings: { stability: style().el.stability, similarity_boost: 0.75, style: style().el.style, use_speaker_boost: true, speed: Math.max(0.7, Math.min(1.2, sp)) }
+      })
     })).arrayBuffer();
   } else if (p === 'azure') {
     const lang = voice.split('-').slice(0, 2).join('-'); const pct = Math.round((sp - 1) * 100);
-    const ssml = `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="${lang}"><voice name="${xmlEsc(voice)}"><prosody rate="${pct >= 0 ? '+' : ''}${pct}%">${xmlEsc(text)}</prosody></voice></speak>`;
+    const ssml = `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xmlns:mstts="https://www.w3.org/2001/mstts" xml:lang="${lang}"><voice name="${xmlEsc(voice)}"><mstts:express-as style="${style().azure}"><prosody rate="${pct >= 0 ? '+' : ''}${pct}%">${xmlEsc(text)}</prosody></mstts:express-as></voice></speak>`;
     buf = await (await req(`https://${c.region || 'eastus'}.tts.speech.microsoft.com/cognitiveservices/v1`, {
       method: 'POST', headers: { 'Ocp-Apim-Subscription-Key': c.key, 'Content-Type': 'application/ssml+xml', 'X-Microsoft-OutputFormat': 'audio-24khz-96kbitrate-mono-mp3' }, body: ssml
     })).arrayBuffer();
@@ -529,11 +553,24 @@ async function cloudSynth(p, voice, text, sp) {
     const lang = voice.split('-').slice(0, 2).join('-');
     const j = await (await req('https://texttospeech.googleapis.com/v1/text:synthesize?key=' + encodeURIComponent(c.key), {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ input: { text }, voice: { languageCode: lang, name: voice }, audioConfig: { audioEncoding: 'MP3', speakingRate: Math.max(0.25, Math.min(2, sp)), sampleRateHertz: RATE } })
+      body: JSON.stringify({ input: { text }, voice: { languageCode: lang, name: voice }, audioConfig: { audioEncoding: 'MP3', speakingRate: Math.max(0.25, Math.min(2, sp)), sampleRateHertz: RATE, ...(/Chirp/.test(voice) ? {} : { pitch: style().pitch }) } })
     })).json();
     buf = Uint8Array.from(atob(j.audioContent || ''), (ch) => ch.charCodeAt(0)).buffer;
   }
   return decodeTo(buf);
+}
+
+/** OpenAI voices take acting directions: the style, who is speaking, and how the book says the line is delivered. */
+function openaiInstructions(ctx) {
+  const extra = $('#openaiStyle').value.trim();
+  let t = extra || style().openai;
+  if (ctx.who && ctx.who !== '*') {
+    const desc = (M.cast.desc || {})[ctx.who];
+    t += ` This line is dialogue spoken by the character ${ctx.who}${desc ? ` (${desc})` : ''}; perform it in character.`;
+  } else if (ctx.who === '*') t += ' This line is dialogue; perform it as a character, not as the narrator.';
+  if (ctx.around) t += ` The book describes how it is said: "${ctx.around.slice(0, 140)}". Match that delivery.`;
+  if (ctx.prev && !ctx.who) t += ` (For context only, the previous line was: "${ctx.prev.slice(-160)}")`;
+  return t;
 }
 
 // ----- audio helpers -----
@@ -561,10 +598,10 @@ function trim(pcm) {
 }
 
 /** One entry point: text → Float32 mono samples at RATE */
-async function synth(v, text, sp) {
+async function synth(v, text, sp, ctx) {
   if (v.eng === 'kokoro') return kokoroSynth(v.id, text, Math.max(0.5, Math.min(2, sp)));
   if (v.eng === 'piper') return piperSynth(v.id, text);
-  if (v.eng === 'cloud') return cloudSynth(v.provider, v.id, text, sp);
+  if (v.eng === 'cloud') return cloudSynth(v.provider, v.id, text, sp, ctx || {});
   throw new Error('Pick a voice first.');
 }
 const speedSupported = (v) => v && v.eng !== 'piper';
@@ -666,7 +703,7 @@ async function playSample(v, btn) {
   const player = $('#player');
   if (btn.classList.contains('on')) { player.pause(); return; }
   const text = ($('#sampleText').value.trim() || 'Hello! This is how I would sound reading your book.').slice(0, 500);
-  const key = [v.eng, v.provider, v.id, text, speed()].join('|');
+  const key = [v.eng, v.provider, v.id, text, effSpeed(), $('#readStyle').value].join('|');
   $$('.voice .play').forEach((b) => b.classList.remove('on'));
   let url = M.samples.get(key);
   if (!url) {
@@ -675,7 +712,7 @@ async function playSample(v, btn) {
       btn.classList.add('busy'); btn.textContent = '…'; busyBtn = btn;
       if (v.eng === 'kokoro' && !K.ready) setVoiceBusyText('Getting Kokoro ready. The first time, it downloads once…');
       try {
-        const pcm = await synth(v, text, speed());
+        const pcm = await synth(v, text, effSpeed());
         url = URL.createObjectURL(new Blob([Formats.wav(pcm, RATE)], { type: 'audio/wav' }));
         M.samples.set(key, url);
       } catch (e) {
@@ -742,7 +779,7 @@ const castKey = () => 'cast:' + (M.book ? M.book.title : '');
 function analyzeBook() {
   try { M.dlg = Dialogue.analyzeDialogue(M.book); } catch (e) { console.error(e); M.dlg = null; }
   const saved = (PREF.casts || {})[castKey()];
-  M.cast = saved ? { quote: saved.quote || null, chars: saved.chars || {}, gender: saved.gender || {} } : { quote: null, chars: {}, gender: {} };
+  M.cast = saved ? { quote: saved.quote || null, chars: saved.chars || {}, gender: saved.gender || {}, desc: saved.desc || {} } : { quote: null, chars: {}, gender: {}, desc: {} };
   castShowAll = false;
 }
 function saveCast() {
@@ -804,13 +841,15 @@ async function renderCast() {
     pool.map((v, i) => `<option value="${i}" ${sel && sel !== 'narr' && sameVoice(sel, v) ? 'selected' : ''}>${esc(v.name)}${v.best ? ' ★' : ''} · ${esc(v.tags || '')}</option>`).join('');
   const gSel = (name, g) => `<select class="cg" data-n="${esc(name)}" title="Man or woman (used when picking voices)"><option value="" ${!g ? 'selected' : ''}>?</option><option value="f" ${g === 'f' ? 'selected' : ''}>♀</option><option value="m" ${g === 'm' ? 'selected' : ''}>♂</option></select>`;
   const rows = [];
+  const openaiCast = M.voice.eng === 'cloud' && M.voice.provider === 'openai';
   rows.push(`<div class="crow fixed"><div class="cn">Narrator<span>everything outside quotes</span></div><div></div><div class="small">${esc(M.voice.name)}</div><button class="play" data-k="__narr">▶</button></div>`);
   if (mode === 'quotes') {
     rows.push(`<div class="crow"><div class="cn">Quoted speech<span>${d.quotes.toLocaleString()} lines</span></div><div></div><select class="cv" data-k="__quote">${opt(M.cast.quote)}</select><button class="play" data-k="__quote">▶</button></div>`);
   } else {
     for (const c of shownCharacters()) {
       const g = M.cast.gender[c.name] ?? c.gender;
-      rows.push(`<div class="crow"><div class="cn" title="${esc(c.name)}">${esc(c.name)}<span>${c.lines} line${c.lines === 1 ? '' : 's'}</span></div>${gSel(c.name, g)}<select class="cv" data-k="${esc(c.name)}">${opt(M.cast.chars[c.name])}</select><button class="play" data-k="${esc(c.name)}">▶</button></div>`);
+      const desc = openaiCast ? `<input class="cdesc" data-n="${esc(c.name)}" value="${esc((M.cast.desc || {})[c.name] || '')}" placeholder="Describe ${esc(c.name)} for the voice actor, e.g. gruff old fisherman, nervous teenager">` : '';
+      rows.push(`<div class="crow"><div class="cn" title="${esc(c.name)}">${esc(c.name)}<span>${c.lines} line${c.lines === 1 ? '' : 's'}</span></div>${gSel(c.name, g)}<select class="cv" data-k="${esc(c.name)}">${opt(M.cast.chars[c.name])}</select><button class="play" data-k="${esc(c.name)}">▶</button>${desc}</div>`);
     }
     const hidden = d.characters.length - shownCharacters().length;
     const others = d.unknown + d.characters.filter((c) => !shownCharacters().includes(c)).reduce((a, c) => a + c.lines, 0);
@@ -830,6 +869,7 @@ async function renderCast() {
       saveCast(); updateSummary();
     };
   });
+  $('#castRows').querySelectorAll('input.cdesc').forEach((inp) => { inp.onchange = () => { M.cast.desc = M.cast.desc || {}; M.cast.desc[inp.dataset.n] = inp.value.trim(); saveCast(); }; });
   $('#castRows').querySelectorAll('select.cg').forEach((sel) => { sel.onchange = () => { M.cast.gender[sel.dataset.n] = sel.value; saveCast(); }; });
   $('#castRows').querySelectorAll('button.play').forEach((b) => { b.onclick = () => playCastSample(b.dataset.k, b); });
   updateSummary();
@@ -867,7 +907,7 @@ async function playCastSample(k, btn) {
   text = (text || 'Hello there. This is how I would sound.').trim();
   btn.classList.add('busy'); btn.textContent = '…';
   try {
-    const pcm = await synth(v, text, speed());
+    const pcm = await synth(v, text, effSpeed(), { who: k === "__narr" ? null : k === "__quote" ? "*" : k });
     player.src = URL.createObjectURL(new Blob([Formats.wav(polish(pcm), RATE)], { type: 'audio/wav' }));
     await player.play();
   } catch (e) { toast('Couldn\'t play that: ' + e.message, 7000); }
@@ -1002,7 +1042,7 @@ function updateSummary() {
   if (!M.book) { $('#summary').textContent = 'Add a book to get started.'; return; }
   const ch = selectedChapters();
   const chars = ch.reduce((a, c) => a + c.chars, 0);
-  const sp = speedSupported(M.voice) ? speed() : 1;
+  const sp = speedSupported(M.voice) ? effSpeed() : 1;
   const secs = chars / 5 / WPM * 60 / sp;
   const f = fmt(); const one = $('#split').value === 'one' && f !== 'wav';
   const bytes = f === 'wav' ? secs * RATE * 2 : secs * (+$('#kbps').value) * 125;
@@ -1020,13 +1060,31 @@ function updateSummary() {
 // 4. Making the audiobook
 // =====================================================================
 const vkey = (who) => { const v = voiceFor(who); return v ? `${v.eng}|${v.provider || ''}|${v.id}` : ''; };
-/** Splits a chapter into chunks small enough for the voice, each tagged with who speaks it. */
-function textChunks(c, max, skipRefs, skipFirst) {
+const SCENE_BREAK = /^[\s*#~•·◆◇◊⁂§=_+—–-]{1,24}$/;
+/**
+ * Splits a chapter into chunks small enough for the voice. Each chunk knows who speaks it, how long to pause
+ * after it (paragraph ends, scene breaks, "…" and cut-off "—" lines, quick back-and-forth dialogue), and the
+ * text around it (used by premium voices to keep the tone flowing).
+ * P = { para, scene } base pause lengths in seconds (already scaled by the style).
+ */
+function textChunks(c, max, skipRefs, skipFirst, P = { para: 0.4, scene: 1.6 }) {
   const out = [];
+  const st = style();
   const multi = dlgMode() !== 'one' && c.segs && M.dlg && M.dlg.quotes;
+  const segsOf = (i) => (c.segs && c.segs[i]) || [{ t: c.paras[i], who: null }];
+  const isQuickLine = (i) => {
+    if (i < 0 || i >= c.paras.length || !c.segs || !c.segs[i]) return false;
+    const sg = c.segs[i];
+    return c.paras[i].length < 140 && sg.some((x) => x.who !== null) && sg.filter((x) => x.who === null).reduce((a, x) => a + x.t.trim().length, 0) < 40;
+  };
   c.paras.forEach((p0, i) => {
     if (skipFirst && i === 0) return;
-    const segs = multi && c.segs[i] ? c.segs[i] : [{ t: p0, who: null }];
+    if (SCENE_BREAK.test(p0) || /^\s*(\* ?){3}\s*$/.test(p0)) {
+      if (out.length) out[out.length - 1].gap = Math.max(out[out.length - 1].gap, P.scene);
+      return;
+    }
+    const segs = multi ? segsOf(i) : [{ t: p0, who: null }];
+    const narration = segs.filter((x) => x.who === null).map((x) => x.t.trim()).join(' ').replace(/^[\s,;:—–-]+/, '');
     const groups = [];
     for (const sg of segs) {
       let t = sg.t;
@@ -1038,10 +1096,23 @@ function textChunks(c, max, skipRefs, skipFirst) {
       const last = groups[groups.length - 1];
       if (last && last.k === k) last.t += ' ' + t; else groups.push({ k, who: sg.who, t });
     }
+    // dialogue that bounces back and forth gets shorter gaps
+    const quick = isQuickLine(i) && isQuickLine(i + 1);
+    const paraGap = quick ? P.para * 0.55 * st.dlg : P.para;
     groups.forEach((g, gi) => {
       const sentences = g.t.match(/[^.!?…]+(?:[.!?…]+["”’»)\]]*|$)\s*/g) || [g.t];
       let cur = '';
-      const push = (t, end) => { t = t.trim(); if (t) out.push({ t, end, who: g.who }); };
+      const push = (t, end) => {
+        t = t.trim(); if (!t) return;
+        const lastGroup = gi === groups.length - 1;
+        let gap;
+        if (end && lastGroup) gap = paraGap;
+        else if (end) gap = 0.24;                       // the other speaker or the narrator comes next
+        else gap = /[.!?…]["”’»)\]]*$/.test(t) ? 0.16 : 0.07;
+        if (/(…|\.\.\.)["”’»]?$/.test(t)) gap += 0.3;   // trailing off…
+        if (/[—–]["”’»]?$/.test(t)) gap = Math.min(gap, 0.06); // cut off mid-word—
+        out.push({ t, end: end && lastGroup, who: g.who, gap, around: g.who !== null ? narration : '' });
+      };
       for (let x of sentences) {
         while (x.length > max) {
           let cut = x.lastIndexOf(', ', max); if (cut < max * 0.4) cut = x.lastIndexOf(' ', max); if (cut < 1) cut = max;
@@ -1051,12 +1122,17 @@ function textChunks(c, max, skipRefs, skipFirst) {
         if ((cur + x).length > max && cur) { push(cur, false); cur = ''; }
         cur += x;
       }
-      push(cur, gi === groups.length - 1);
+      push(cur, true);
     });
+  });
+  // context: the text just before and after each chunk
+  out.forEach((ch, j) => {
+    ch.prev = j > 0 ? out[j - 1].t.slice(-300) : '';
+    ch.next = j + 1 < out.length ? out[j + 1].t.slice(0, 300) : '';
   });
   return out;
 }
-const maxChars = (v) => (v.eng === 'cloud' ? (CLOUD[v.provider] || { max: 2500 }).max : v.eng === 'piper' ? 600 : 320);
+const maxChars = (v) => (v.eng === 'cloud' ? (CLOUD[v.provider] || { max: 2500 }).max : v.eng === 'piper' ? 1000 : 400);
 
 /** Encoders: feed Float32 PCM at RATE, get a Blob at the end. */
 let mp3Worker = null;
@@ -1159,8 +1235,10 @@ async function make(o = {}) {
   const f = preview ? 'mp3' : fmt();
   const perChapter = !preview && (f === 'wav' || $('#split').value === 'chapters');
   const kbps = +$('#kbps').value;
-  const sp = speedSupported(v) ? speed() : 1;
-  const chPause = +$('#chapPause').value, paraPause = +$('#paraPause').value;
+  const st = style();
+  const sp = speedSupported(v) ? effSpeed() : 1;
+  const chPause = +$('#chapPause').value * st.chap, paraPause = +$('#paraPause').value * st.para;
+  const scenePause = Math.max(1.2, chPause * 0.8) * st.scene;
   const opt = { intro: !scene && $('#intro').checked, announce: !scene && $('#announce').checked, skipRefs: $('#skipRefs').checked, tags: $('#tags').checked };
   const chapters = scene ? [scene] : preview ? selectedChapters().slice(0, 1) : selectedChapters();
   const ext = { m4b: 'm4b', mp3: 'mp3', wav: 'wav' }[f];
@@ -1191,7 +1269,7 @@ async function make(o = {}) {
   const max = Math.min(...[v, ...(dlgMode() === 'one' ? [] : [...Object.values(M.cast.chars), M.cast.quote])].filter((x) => x && x !== 'narr').map(maxChars));
   const plan = chapters.map((c, k) => {
     const skipFirst = opt.announce && c.paras.length && c.paras[0].trim().toLowerCase() === c.title.trim().toLowerCase();
-    let chunks = textChunks(c, max, opt.skipRefs, skipFirst);
+    let chunks = textChunks(c, max, opt.skipRefs, skipFirst, { para: paraPause, scene: scenePause });
     if (preview) { const lim = scene ? 1300 : 950; let n = 0; chunks = chunks.filter((x) => (n += x.t.length) < lim || n - x.t.length === 0); }
     return { c, k, chunks, chars: chunks.reduce((a, x) => a + x.t.length, 0) };
   });
@@ -1205,7 +1283,7 @@ async function make(o = {}) {
   const render = async (ch) => {
     const voice = voiceFor(ch.who);
     for (let attempt = 0; ; attempt++) {
-      try { return polish(trim(await synth(voice, ch.t, sp))); }
+      try { return polish(trim(await synth(voice, ch.t, sp, { who: ch.who, prev: ch.prev, next: ch.next, around: ch.around }))); }
       catch (e) {
         if (M.cancel) return null;
         if (attempt >= 2 || /key was rejected|quota/i.test(e.message)) throw e;
@@ -1257,8 +1335,7 @@ async function make(o = {}) {
         else { progress(label(j)); pcm = await render(ch); doneChars += ch.t.length; }
         if (M.cancel || !pcm) break;
         await put(pcm);
-        const next = p.chunks[j + 1];
-        await put(silence(ch.end ? paraPause : next && vkey(next.who) !== vkey(ch.who) ? 0.22 : 0.12));
+        await put(silence(ch.gap));
       }
       if (M.cancel) break;
       await put(silence(chPause));
@@ -1330,6 +1407,11 @@ addEventListener('beforeunload', (e) => { if (M.making) { e.preventDefault(); e.
   if (PREF.openaiStyle) $('#openaiStyle').value = PREF.openaiStyle;
   if (PREF.voice) M.voice = PREF.voice;
   if (PREF.dlgMode) $('#dlgMode').value = PREF.dlgMode;
+  $('#readStyle').innerHTML = Object.entries(STYLES).map(([k, x]) => `<option value="${k}">${esc(x.name)}</option>`).join('');
+  $('#readStyle').value = STYLES[PREF.readStyle] ? PREF.readStyle : 'natural';
+  const styleNote = () => { $('#styleNote').textContent = style().note + (M.voice && M.voice.eng === 'cloud' ? ' Premium voices also change how they perform.' : ''); };
+  styleNote();
+  $('#readStyle').onchange = () => { PREF.readStyle = $('#readStyle').value; savePref(); styleNote(); M.samples.clear(); if (M.book) { drawChapters(); updateSummary(); } };
   for (const k of ['normalize', 'roomTone']) if (typeof PREF[k] === 'boolean') $('#' + k).checked = PREF[k];
   if (PREF.sting) $('#sting').value = PREF.sting;
   ['#normalize', '#roomTone'].forEach((x) => { $(x).onchange = () => { PREF[x.slice(1)] = $(x).checked; savePref(); M.samples.clear(); }; });

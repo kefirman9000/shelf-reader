@@ -140,3 +140,7 @@ footer { margin-top: 26px; text-align: center; line-height: 1.7; }
 .sound .checks { margin: 8px 0 4px; }
 button.icon { width: 36px; height: 36px; border-radius: 50%; padding: 0; }
 @media (max-width: 640px) { .crow { grid-template-columns: 1fr 70px; } .crow select.cv { grid-column: 1 / 2; } }
+
+.style { width: 210px; }
+.style-note { margin-top: 6px; }
+.crow .cdesc { grid-column: 1 / -1; font-size: 13px; padding: 5px 8px; }
