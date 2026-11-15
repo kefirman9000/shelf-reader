@@ -79,8 +79,16 @@ function createWindow() {
   win.loadURL(`http://127.0.0.1:${port}/`);
   // Links that leave the app open in the normal browser.
   win.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith(`http://127.0.0.1:${port}/maker.html`)) {
+      return { action: 'allow', overrideBrowserWindowOptions: { width: 1100, height: 900, autoHideMenuBar: true, backgroundColor: '#141414', title: 'Audiobook maker' } };
+    }
     if (/^https?:\/\//.test(url) && !url.startsWith(`http://127.0.0.1:${port}`)) shell.openExternal(url);
     return { action: 'deny' };
+  });
+  // The audiobook maker window: outside links open in the browser, and it may ask for a save folder.
+  win.webContents.on('did-create-window', (child) => {
+    child.removeMenu();
+    child.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:\/\//.test(url)) shell.openExternal(url); return { action: 'deny' }; });
   });
   win.webContents.on('will-navigate', (e, url) => {
     if (!url.startsWith(`http://127.0.0.1:${port}`)) { e.preventDefault(); shell.openExternal(url); }

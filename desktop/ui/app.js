@@ -1000,6 +1000,7 @@ async function checkUpdates() {
 }
 
 // ---------- Edge ----------
+$('#makerBtn').onclick = () => window.open('maker.html', '_blank', 'width=1100,height=900');
 $('#edgeBtn').onclick = (e) => {
   const r = e.target.getBoundingClientRect();
   const open = async (which) => {

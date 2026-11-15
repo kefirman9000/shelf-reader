@@ -10,7 +10,7 @@ self.onmessage = (e) => {
   const m = e.data;
   try {
     if (m.type === 'start') {
-      enc = new lamejs.Mp3Encoder(1, m.rate, 64);
+      enc = new lamejs.Mp3Encoder(1, m.rate, m.kbps || 64);
       parts = []; size = 0;
       self.postMessage({ ok: true });
     } else if (m.type === 'chunk') {

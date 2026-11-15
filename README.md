@@ -30,6 +30,32 @@ An Android ebook reader that finds free, legal books and **reads them aloud** wi
 
 ---
 
+## Audiobook maker
+
+![Audiobook maker](docs/screenshots/maker.png)
+
+A drag-and-drop page that turns a book into audiobook files. Open it from the **Audiobook maker** button in the PC app, or host it with GitHub Pages (see below).
+
+1. **Drop a book:** EPUB, PDF, Word (.docx), TXT, Markdown or HTML. You can also paste text. Chapters, title, author and cover are read from the file. Untick chapters you don't want, and rename any of them.
+2. **Pick a voice and hear it first:** press ▶ on any voice to hear your own book's opening, at the speed you choose.
+   - **Kokoro:** 23 natural English voices, free. They run on your computer, and the model downloads once (90 MB, or 330 MB for the faster graphics-card engine).
+   - **Piper:** free voices in 30+ languages. Each voice downloads once.
+   - **Premium:** OpenAI (with a narration-style box), ElevenLabs, Microsoft Azure or Google Cloud, using your own API key. The key is only sent to that service and is saved only if you tick "Remember".
+3. **Export options:**
+   - **M4B audiobook:** one file with chapters, cover and tags (Chrome, Edge or Safari).
+   - **MP3:** works everywhere, with chapter markers and cover.
+   - **WAV:** for editing.
+   - Whole book in one file, or one file per chapter.
+   - 48–128 kbps quality.
+   - Pauses between chapters and paragraphs.
+   - Optional spoken title, author and chapter names.
+   - Footnote markers and web links are skipped.
+4. **Make it:** files download (several come as one .zip), or are saved into a folder you choose. Folder mode saves each chapter as soon as it's done and can pick up where it stopped. **Preview the first minute** checks everything before you start a long book.
+
+Your book never leaves your device, except when you choose a premium voice. That voice's text goes to the service you picked.
+
+**Hosting it as a web page:** GitHub Pages needs a public repository (or a paid plan for private ones). Go to **Settings → Pages**, choose **Deploy from a branch**, pick `main` and `/ (root)`, and the maker will be at `https://<your-user>.github.io/shelf-reader/`. Making the repository public also lets the apps' **Check for updates** button work.
+
 ## Install
 
 ### Android

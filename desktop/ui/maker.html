@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Audiobook maker · Shelf Reader</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Turn an EPUB, PDF, Word or text file into an audiobook with natural voices, right in your browser.">
+  <script src="coi-serviceworker.min.js"></script>
+  <link rel="stylesheet" href="maker.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand"><span class="logo"></span>Shelf Reader <span class="sub">Audiobook maker</span></div>
+    <div class="spacer"></div>
+    <span id="isoBadge" class="badge" hidden></span>
+    <a class="ghost" href="https://github.com/kefirman9000/shelf-reader" target="_blank" rel="noopener">About</a>
+  </header>
+
+  <main>
+    <section class="hero">
+      <h1>Turn any book into an audiobook</h1>
+      <p class="muted">Drop in an EPUB, PDF, Word, text or web page file, choose a natural voice, and get an audiobook with chapters. The free voices run right here in your browser, and your book never leaves this device.</p>
+    </section>
+
+    <!-- 1. Book -->
+    <section class="card" id="stepBook">
+      <h2><span class="num">1</span>Your book</h2>
+      <label id="drop" class="drop" tabindex="0">
+        <input type="file" id="file" accept=".epub,.pdf,.docx,.txt,.md,.markdown,.html,.htm,.xhtml" hidden>
+        <div class="drop-icon">⬇</div>
+        <div><b>Drop a book here</b> or click to choose a file</div>
+        <div class="muted small">EPUB · PDF · DOCX · TXT · Markdown · HTML</div>
+      </label>
+      <div class="or"><button id="pasteBtn" class="link">…or paste some text instead</button></div>
+      <div id="pasteBox" hidden>
+        <textarea id="pasteText" rows="8" placeholder="Paste text here. Lines like “Chapter 1” start new chapters."></textarea>
+        <div class="row"><button id="pasteUse" class="primary">Use this text</button><button id="pasteCancel">Cancel</button></div>
+      </div>
+
+      <div id="bookInfo" hidden>
+        <div class="book-head">
+          <div id="cover" class="cover"></div>
+          <div class="book-meta">
+            <label class="field"><span>Title</span><input id="bTitle"></label>
+            <label class="field"><span>Author</span><input id="bAuthor"></label>
+            <div id="bStats" class="muted small"></div>
+            <div class="row small">
+              <button id="coverBtn">Change cover…</button>
+              <input type="file" id="coverFile" accept="image/jpeg,image/png" hidden>
+              <button id="otherBook" class="link">Use a different book</button>
+            </div>
+          </div>
+        </div>
+        <div class="ch-head">
+          <b>Chapters</b>
+          <span class="muted small" id="chCount"></span>
+          <div class="spacer"></div>
+          <button id="chAll" class="link">All</button><button id="chNone" class="link">None</button>
+        </div>
+        <ol id="chapters" class="chapters"></ol>
+      </div>
+    </section>
+
+    <!-- 2. Voice -->
+    <section class="card" id="stepVoice">
+      <h2><span class="num">2</span>Pick a voice</h2>
+      <div class="tabs" role="tablist">
+        <button class="tab active" data-eng="kokoro">Kokoro <span class="pill">★ free</span></button>
+        <button class="tab" data-eng="piper">Piper <span class="pill">free · 30+ languages</span></button>
+        <button class="tab" data-eng="cloud">Premium <span class="pill">your API key</span></button>
+      </div>
+
+      <div class="eng-note" id="engNote"></div>
+
+      <div class="sample-row">
+        <label class="field grow"><span>Sample text</span><textarea id="sampleText" rows="2"></textarea></label>
+        <label class="field speed"><span>Speed <b id="speedVal">1.0×</b></span><input type="range" id="speed" min="0.6" max="1.6" step="0.05" value="1"></label>
+      </div>
+
+      <div id="kokoroOpts" class="eng-opts">
+        <label class="field inline"><span>Engine</span>
+          <select id="kokoroMode">
+            <option value="fp32-webgpu">Fast: uses your graphics card (330 MB, one-time download)</option>
+            <option value="q8-wasm">Compatible: works everywhere (90 MB, one-time download)</option>
+          </select>
+        </label>
+        <span id="kokoroStatus" class="muted small"></span>
+      </div>
+
+      <div id="piperOpts" class="eng-opts" hidden>
+        <label class="field inline"><span>Language</span><select id="piperLang"></select></label>
+        <label class="check small"><input type="checkbox" id="piperBestOnly" checked> Best quality only</label>
+      </div>
+
+      <div id="cloudOpts" class="eng-opts" hidden>
+        <div class="row wrap">
+          <label class="field inline"><span>Service</span>
+            <select id="cloudProv">
+              <option value="openai">OpenAI</option>
+              <option value="elevenlabs">ElevenLabs</option>
+              <option value="azure">Microsoft Azure</option>
+              <option value="google">Google Cloud</option>
+            </select>
+          </label>
+          <label class="field inline grow"><span>API key</span><input id="cloudKey" type="password" autocomplete="off" placeholder="Paste your key"></label>
+          <label class="field inline" id="azureRegionF" hidden><span>Region</span><input id="cloudRegion" placeholder="eastus" size="10"></label>
+          <button id="cloudLoad" class="primary">Load voices</button>
+        </div>
+        <div class="row wrap small">
+          <a id="cloudGetKey" target="_blank" rel="noopener">Get a key</a>
+          <label class="check"><input type="checkbox" id="cloudRemember"> Remember the key on this device</label>
+          <span class="muted">Your key is only sent to that service. Premium voices are billed by the service per character.</span>
+        </div>
+        <label class="field" id="openaiStyleF"><span>Narration style (OpenAI only)</span><input id="openaiStyle" placeholder="e.g. Warm, calm audiobook narrator with natural pauses"></label>
+      </div>
+
+      <div id="voices" class="voices"></div>
+      <div id="voiceChosen" class="chosen muted small"></div>
+    </section>
+
+    <!-- 3. Export -->
+    <section class="card" id="stepExport">
+      <h2><span class="num">3</span>Export options</h2>
+      <div class="formats">
+        <label class="fmt"><input type="radio" name="fmt" value="m4b"><div><b>M4B audiobook</b><span>One file with chapters, cover and title. Best for audiobook apps (Apple Books, BookPlayer, Smart AudioBook Player, Voice).</span><em id="m4bNote"></em></div></label>
+        <label class="fmt"><input type="radio" name="fmt" value="mp3" checked><div><b>MP3</b><span>Plays anywhere: phones, cars, MP3 players. Chapter markers and cover included.</span></div></label>
+        <label class="fmt"><input type="radio" name="fmt" value="wav"><div><b>WAV</b><span>Uncompressed, for editing. Large files, so it's made one file per chapter.</span></div></label>
+      </div>
+
+      <div class="grid2">
+        <label class="field"><span>Files</span>
+          <select id="split">
+            <option value="one">Whole book in one file</option>
+            <option value="chapters">One file per chapter</option>
+          </select>
+        </label>
+        <label class="field"><span>Quality</span>
+          <select id="kbps">
+            <option value="48">Small · 48 kbps (22 MB/hour)</option>
+            <option value="64" selected>Good · 64 kbps (29 MB/hour)</option>
+            <option value="96">Better · 96 kbps (43 MB/hour)</option>
+            <option value="128">Best · 128 kbps (58 MB/hour)</option>
+          </select>
+        </label>
+        <label class="field"><span>Pause between chapters</span>
+          <select id="chapPause"><option value="0.8">Short</option><option value="1.8" selected>Medium</option><option value="3">Long</option></select>
+        </label>
+        <label class="field"><span>Pause between paragraphs</span>
+          <select id="paraPause"><option value="0.15">Short</option><option value="0.4" selected>Medium</option><option value="0.8">Long</option></select>
+        </label>
+      </div>
+      <div class="checks">
+        <label class="check"><input type="checkbox" id="intro" checked> Start with the title and author</label>
+        <label class="check"><input type="checkbox" id="announce" checked> Read each chapter's title</label>
+        <label class="check"><input type="checkbox" id="skipRefs" checked> Skip footnote markers like [12] and web links</label>
+        <label class="check"><input type="checkbox" id="tags" checked> Add the cover, title and author to the files</label>
+      </div>
+      <div class="field">
+        <span>Save to</span>
+        <div class="row wrap">
+          <label class="check"><input type="radio" name="dest" value="download" checked> Downloads <span class="muted small">(several files come as one .zip)</span></label>
+          <label class="check" id="destFolderL"><input type="radio" name="dest" value="folder"> A folder I choose <span class="muted small">(saves each chapter as it's finished and can pick up where it stopped)</span></label>
+        </div>
+      </div>
+    </section>
+
+    <!-- 4. Make -->
+    <section class="card" id="stepMake">
+      <h2><span class="num">4</span>Make it</h2>
+      <div id="summary" class="summary muted"></div>
+      <div class="row wrap">
+        <button id="makeBtn" class="primary big" disabled>Make audiobook</button>
+        <button id="previewBtn" disabled>Preview the first minute</button>
+      </div>
+      <div id="progress" class="progress" hidden>
+        <div class="bar"><div id="barFill"></div></div>
+        <div class="row small"><span id="progText"></span><div class="spacer"></div><span id="progEta" class="muted"></span><button id="cancelBtn" class="danger">Stop</button></div>
+        <div class="muted small">Keep this tab open. It can run in the background, and your screen won't go to sleep while it works.</div>
+      </div>
+      <div id="results" class="results"></div>
+    </section>
+
+    <footer class="muted small">
+      Free voices: <a href="https://huggingface.co/hexgrad/Kokoro-82M" target="_blank" rel="noopener">Kokoro</a> and <a href="https://github.com/rhasspy/piper" target="_blank" rel="noopener">Piper</a>. They download once and then work offline. Your browser's built-in voices can't be saved to a file, so they aren't listed here.
+      Only use books you have the right to convert, such as public-domain books or your own writing.
+    </footer>
+  </main>
+
+  <audio id="player" hidden></audio>
+  <div id="toast" class="toast" hidden></div>
+  <script src="maker-formats.js"></script>
+  <script src="maker.js"></script>
+</body>
+</html>

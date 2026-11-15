@@ -8,3 +8,6 @@ lame.all.js    — lamejs 1.2.1 (https://github.com/zhuker/lamejs), LGPL-3.0.
 piper.web.js   — @mintplex-labs/piper-tts-web 1.0.5 (MIT), bundling onnxruntime-web 1.18.0 (MIT).
                  Piper voices are downloaded on demand from Hugging Face; each voice has its own
                  license listed in its MODEL_CARD.
+pdf.min.mjs, pdf.worker.min.mjs — pdf.js (pdfjs-dist 6.5.438, https://github.com/mozilla/pdf.js), Apache License 2.0.
+../coi-serviceworker.min.js — coi-serviceworker 0.1.7 (https://github.com/gzuidhof/coi-serviceworker), MIT.
+                 Only used when the audiobook maker is hosted somewhere that can't send COOP/COEP headers.
