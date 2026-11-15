@@ -96,10 +96,18 @@ You can also **import** your own DRM-free **EPUB, PDF or TXT** files.
 - **Pronunciation fixes:** teach it how to say names and words it gets wrong.
 
 ### Reading
-- **Book view (PC):** pages you turn instead of one long scroll. Two-page spreads on wide windows, page numbers, chapter headers, decorative first letters, chapters starting on a new page, and minutes left in the chapter. Turn pages with the arrow keys, the mouse wheel, or by clicking the page edges. While reading aloud, it turns the pages for you. **Scroll view** is one click away, and **F** goes full screen.
+- **Book view (phone and PC):** pages you turn instead of one long scroll. On the phone, swipe or tap the page edges; tap the middle to hide the buttons. On PC you get two-page spreads on wide windows, and you turn with the arrow keys, the mouse wheel or the page edges (**F** goes full screen). Page numbers, chapter headers, and chapters that start on a new page. While reading aloud, it turns the pages for you. **Scroll view** is one tap away.
+- **Cover and contents pages:** each book opens on its cover, followed by a contents page you can tap.
+- **Page turn style:** a quick slide or a 3D page flip.
+- **Pictures:** illustrations from EPUB books show in the text.
+- **Footnotes:** tap a `[1]` marker to read the note in a pop-up without losing your page.
+- **Highlighters:** yellow, green or pink, with an optional note. **Export** all your highlights, notes and bookmarks as a Markdown file (on the phone, through the share menu: Drive, email, Keep…).
 - **Chapter list** taken from the book's table of contents (or detected in plain text).
 - **Bookmarks and notes:** long-press any paragraph.
-- **Themes:** dark, light, sepia and black, with a choice of font, margins and text size.
+- **Themes:** dark, light, sepia and black, with a choice of font, margins and text size. **Night mode schedule** switches to a dark theme between the hours you pick.
+- **"Last time…" recap:** when you come back to a book, it shows the last sentence you heard and the chapter you were in.
+- **Reading stats:** minutes read and listened each day, a daily goal, your streak, and books finished.
+- **Phone ↔ PC sync:** keeps your place, bookmarks, highlights, notes, collections and stats the same on both devices through one small `ShelfReader-sync.json` file in Google Drive or OneDrive. Set it up in the PC app's **Settings → Sync** and the phone's **Menu → Sync with PC**. Books themselves aren't copied.
 - Remembers your place in every book, down to the sentence.
 
 ### Ease of use
@@ -107,7 +115,7 @@ You can also **import** your own DRM-free **EPUB, PDF or TXT** files.
 - **Collections:** *Want to read*, *Finished* (books are added automatically when you finish them) and your own collections. Filter the library by any of them.
 - **Car mode:** a black screen with huge buttons, 30-second rewind and skip, and chapter jumps. The screen stays on.
 - **Gestures:** tap a paragraph to read from it, double-tap to play or pause, swipe sideways to skip a paragraph.
-- **Search inside a book**, and **look up any word** (long-press a paragraph → *Look up a word*, using the free dictionaryapi.dev).
+- **Search inside a book**, and **look up any word** (long-press a paragraph → *Highlight, define or note a passage*, using the free dictionaryapi.dev).
 - **Per-book voice and speed:** each book remembers its own.
 - **Resume when headphones connect:** a paused book starts again when you plug in or connect Bluetooth headphones.
 - **First-run voice guide** for getting Google's best voice, also in the main menu.
