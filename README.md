@@ -2,6 +2,32 @@
 
 An Android ebook reader that finds free, legal books and **reads them aloud** with your phone's natural voices, including Google's. It keeps reading with the screen off, like an audiobook.
 
+
+<p align="center">
+  <img src="docs/screenshots/desktop-shelf.png" alt="Library shelf view" width="900">
+</p>
+
+<table>
+  <tr>
+    <td><img src="docs/screenshots/desktop-reader.png" alt="Reader with the current sentence highlighted"></td>
+    <td><img src="docs/screenshots/desktop-chapters.png" alt="Chapter list"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Reading aloud: the current sentence is highlighted</sub></td>
+    <td align="center"><sub>Chapters from the book's table of contents</sub></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/desktop-grid.png" alt="Grid view"></td>
+    <td><img src="docs/screenshots/desktop-settings.png" alt="Settings"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Grid view with progress bars</sub></td>
+    <td align="center"><sub>Themes, fonts, pronunciation fixes, backup</sub></td>
+  </tr>
+</table>
+
+<sub>Screenshots from the Windows app in dark mode. The sample book text was written for these screenshots.</sub>
+
 ---
 
 ## Install
