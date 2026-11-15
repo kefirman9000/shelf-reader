@@ -25,7 +25,7 @@ const supported = () => process.platform === 'win32';
 
 function powershell(script, onChild) {
   return new Promise((resolve, reject) => {
-    const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', '-'], { windowsHide: true });
+    const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', '-'], { windowsHide: true });
     if (onChild) onChild(child);
     let out = ''; let err = '';
     child.stdout.on('data', (d) => (out += d));

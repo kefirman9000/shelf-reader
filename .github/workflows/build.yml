@@ -39,7 +39,7 @@ jobs:
         with:
           tag_name: build-${{ github.run_number }}
           name: Shelf Reader (build ${{ github.run_number }})
-          body: "Android: download ShelfReader.apk and open it on your phone (or use Menu → Check for updates in the app). Windows: download ShelfReader-Setup.exe to install, or ShelfReader-Portable.exe to run without installing."
+          body: "Android: download ShelfReader.apk and open it on your phone (or use Menu → Check for updates in the app). Windows: download ShelfReader-Setup.exe to install, or ShelfReader-Windows.zip to run without installing (unzip it, then open Shelf Reader.exe)."
           files: ShelfReader.apk
           make_latest: true
 
@@ -65,7 +65,7 @@ jobs:
         working-directory: desktop
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-        run: npx electron-builder --win nsis portable --publish never
+        run: npx electron-builder --win nsis zip --publish never
 
       - name: Add to release
         uses: softprops/action-gh-release@v2
@@ -73,4 +73,4 @@ jobs:
           tag_name: build-${{ github.run_number }}
           files: |
             desktop/dist/ShelfReader-Setup.exe
-            desktop/dist/ShelfReader-Portable.exe
+            desktop/dist/ShelfReader-Windows.zip

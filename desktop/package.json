@@ -9,7 +9,7 @@
   "scripts": {
     "start": "electron .",
     "serve": "node server.js",
-    "dist": "electron-builder --win nsis portable --publish never"
+    "dist": "electron-builder --win nsis zip --publish never"
   },
   "dependencies": {
     "adm-zip": "^0.5.18",
@@ -47,8 +47,8 @@
       "createDesktopShortcut": true,
       "artifactName": "ShelfReader-Setup.${ext}"
     },
-    "portable": {
-      "artifactName": "ShelfReader-Portable.${ext}"
+    "zip": {
+      "artifactName": "ShelfReader-Windows.${ext}"
     }
   }
 }

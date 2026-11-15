@@ -41,8 +41,9 @@ An Android ebook reader that finds free, legal books and **reads them aloud** wi
 
 ### Windows
 1. Open the **[latest release](../../releases/latest)** on your PC.
-2. Download **`ShelfReader-Setup.exe`** to install it, or **`ShelfReader-Portable.exe`** to run it without installing.
+2. Download **`ShelfReader-Setup.exe`** to install it, or **`ShelfReader-Windows.zip`** to run it without installing (unzip it, then open `Shelf Reader.exe`).
 3. Windows may show *“Windows protected your PC”* because the app isn't code-signed. Click **More info → Run anyway**.
+4. If Microsoft Defender quarantines it, that's a false positive common with new, unsigned apps. You can restore it under *Windows Security → Virus & threat protection → Protection history* (only do this for files you downloaded from this repo's Releases page), and report it to Microsoft as a false positive at https://www.microsoft.com/en-us/wdsi/filesubmission.
 
 The desktop app has the same library, cover shelf, search, reader, chapters, bookmarks and notes, collections, sleep timer, pronunciation fixes and themes. Extras on PC:
 - **Voice options** (*Better voices ▾ → Natural & premium voices*, or *Settings*):
