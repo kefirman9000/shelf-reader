@@ -1,5 +1,6 @@
 package com.shelfreader
 
+import android.speech.tts.TextToSpeech
 import android.speech.tts.Voice
 import java.util.Locale
 
@@ -63,5 +64,36 @@ object VoiceNames {
             out += v to "$reg · $kind $n" + if (extras.isNotEmpty()) "  (" + extras.joinToString(", ") + ")" else ""
         }
         return out.sortedWith(compareBy({ it.second.substringBefore(" · ") }, { it.second }))
+    }
+
+    /** "…-local" ⇄ "…-network": the same speaker, offline or online. */
+    private fun sibling(name: String): String? = when {
+        name.endsWith("-local") -> name.removeSuffix("-local") + "-network"
+        name.endsWith("-network") -> name.removeSuffix("-network") + "-local"
+        else -> null
+    }
+
+    /**
+     * Switches [engine] to the wanted voice and checks that it really switched.
+     * If the offline version isn't installed it tries the online version of the same speaker.
+     * Returns the voice now in use, or null if the wanted voice isn't available
+     * (the engine then stays on its default voice).
+     */
+    fun apply(engine: TextToSpeech, wanted: String?): Voice? {
+        val all = try { engine.voices?.toList() ?: emptyList() } catch (e: Throwable) { emptyList() }
+        if (wanted == null) {
+            try { engine.defaultVoice?.let { engine.voice = it } } catch (e: Throwable) {}
+            return try { engine.voice } catch (e: Throwable) { null }
+        }
+        val names = listOfNotNull(wanted, sibling(wanted))
+        for (n in names) {
+            val v = all.firstOrNull { it.name == n } ?: continue
+            if (v.features?.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) == true) continue
+            val ok = try { engine.setVoice(v) == TextToSpeech.SUCCESS } catch (e: Throwable) { false }
+            val now = try { engine.voice?.name } catch (e: Throwable) { null }
+            if (ok && now == v.name) return v
+        }
+        try { engine.defaultVoice?.let { engine.voice = it } } catch (e: Throwable) {}
+        return null
     }
 }

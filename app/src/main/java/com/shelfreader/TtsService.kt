@@ -79,6 +79,7 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
     private var lastSpoken = -1
     private var foreground = false
     private var lastNotifKey = ""
+    private var warnedVoice: String? = null
 
     private var sleepDeadline = 0L
     private var sleepAtChapterEnd = false
@@ -370,10 +371,11 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
         if (!ready) return
         t.setSpeechRate(Settings.rateFor(this, bookId))
         val wanted = Settings.voiceFor(this, bookId)
-        try {
-            if (wanted != null) t.voices?.firstOrNull { it.name == wanted }?.let { t.voice = it }
-            else t.defaultVoice?.let { t.voice = it }
-        } catch (e: Throwable) { /* some engines throw on voice queries */ }
+        val used = VoiceNames.apply(t, wanted)
+        if (wanted != null && used == null && warnedVoice != wanted) {
+            warnedVoice = wanted
+            toast("That voice isn't available on this phone right now (it may need downloading, or internet), so the default voice is being used.")
+        }
         if (restart && playing) speakFrom(segIndex)
     }
 

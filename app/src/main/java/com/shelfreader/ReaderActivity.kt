@@ -549,7 +549,14 @@ class ReaderActivity : Activity() {
     private fun preview(engine: TextToSpeech, v: Voice?) {
         try {
             engine.stop()
-            if (v != null) engine.voice = v else engine.defaultVoice?.let { engine.voice = it }
+            val used = VoiceNames.apply(engine, v?.name)
+            if (v != null && used == null) {
+                toast("This voice isn't installed on your phone yet, so you'd hear the default voice. Tap “Get more voices…” to download it.")
+                return
+            }
+            if (v != null && used != null && used.name != v.name) {
+                toast(if (used.isNetworkConnectionRequired) "Using the online version of this voice." else "Using the offline version of this voice.")
+            }
             engine.setSpeechRate(Settings.rateFor(this, book.id))
             engine.speak("Hello! This is how I'll sound reading your book.", TextToSpeech.QUEUE_FLUSH, null, "preview")
         } catch (e: Throwable) {
