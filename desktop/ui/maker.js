@@ -296,6 +296,7 @@ function setBook(b) {
 }
 
 function drawCover() {
+  $('#coverCredit').textContent = M.book.cover?.credit ? 'Cover art: ' + M.book.cover.credit : '';
   const el = $('#cover');
   if (M.book.cover?.url) { el.style.backgroundImage = `url("${M.book.cover.url}")`; el.textContent = ''; }
   else { el.style.backgroundImage = ''; el.textContent = M.book.title; }
@@ -348,6 +349,7 @@ $('#otherBook').onclick = () => { if (M.making) return; $('#bookInfo').hidden = 
 $('#coverBtn').onclick = () => $('#coverFile').click();
 $('#coverFile').onchange = (e) => { const f = e.target.files[0]; e.target.value = ''; if (f) setCoverFile(f); };
 async function setCoverFile(f) {
+  if (typeof cvFromFile === 'function') return cvFromFile(f);
   M.book.cover = { mime: f.type === 'image/png' ? 'image/png' : 'image/jpeg', data: new Uint8Array(await f.arrayBuffer()) };
   M.book.cover.url = URL.createObjectURL(f); drawCover();
 }
@@ -1275,7 +1277,7 @@ async function make(o = {}) {
   });
   const totalChars = plan.reduce((a, p) => a + (skip.has(p.k) ? 0 : p.chars), 0) || 1;
   let doneChars = 0; const t0 = performance.now();
-  const meta = (title, extra) => (opt.tags ? { title, artist: b.author, album: b.title, cover: b.cover?.data ? b.cover : null, ...extra } : null);
+  const meta = (title, extra) => (opt.tags ? { title, artist: b.author, album: b.title, cover: b.cover?.data ? b.cover : null, comment: b.cover?.credit ? 'Cover art: ' + b.cover.credit : '', ...extra } : null);
   const tone = $('#roomTone').checked ? makeRoomTone() : null;
   const put = (pcm) => enc.add(tone ? tone(pcm) : pcm);
   const say = async (text) => { await put(polish(trim(await synth(v, text, sp)))); };

@@ -117,6 +117,7 @@
     if (meta.track) fr.push(textFrame('TRCK', meta.track));
     fr.push(textFrame('TCON', meta.genre || 'Audiobook'));
     fr.push(textFrame('TSSE', 'Shelf Reader audiobook maker'));
+    if (meta.comment) fr.push(frame('COMM', concat([u8(3), str('eng'), u8(0), str(meta.comment)])));
     if (meta.cover && meta.cover.data) fr.push(frame('APIC', concat([u8(3), str(meta.cover.mime || 'image/jpeg'), u8(0, 3), str('Cover'), u8(0), meta.cover.data])));
     const ch = meta.chapters || [];
     if (ch.length > 1) {
@@ -200,6 +201,7 @@
       if (meta.album || meta.title) items.push(ilstItem('©alb', meta.album || meta.title));
       items.push(ilstItem('©gen', 'Audiobook'));
       items.push(ilstItem('©too', 'Shelf Reader audiobook maker'));
+      if (meta.comment) items.push(ilstItem('©cmt', meta.comment));
       items.push(ilstItem('stik', u8(2), 21));
       if (meta.cover && meta.cover.data) items.push(ilstItem('covr', meta.cover.data, /png/.test(meta.cover.mime || '') ? 14 : 13));
       const metaBox = full('meta', 0, 0, full('hdlr', 0, 0, u32(0), str('mdir'), str('appl'), u32(0), u32(0), u8(0)), box('ilst', ...items));

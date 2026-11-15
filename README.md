@@ -37,10 +37,13 @@ An Android ebook reader that finds free, legal books and **reads them aloud** wi
 A drag-and-drop page that turns a book into audiobook files. Open it from the **Audiobook maker** button in the PC app, or host it with GitHub Pages (see below).
 
 1. **Drop a book:** EPUB, PDF, Word (.docx), TXT, Markdown or HTML. You can also paste text. Chapters, title, author and cover are read from the file. Untick chapters you don't want, and rename any of them.
+   - **Cover art:** use the book's own cover, or press **Change cover art…** to pick a published cover (Open Library), free-licensed art (Openverse or Wikimedia Commons, with the credit saved in the files), an original designed cover, or your own picture. Crop it square for audiobook apps or book-shaped, and add the title if you like.
 2. **Pick a voice and hear it first:** press ▶ on any voice to hear your own book's opening, at the speed you choose.
    - **Kokoro:** 23 natural English voices, free. They run on your computer, and the model downloads once (90 MB, or 330 MB for the faster graphics-card engine).
    - **Piper:** free voices in 30+ languages. Each voice downloads once.
    - **Premium:** OpenAI (with a narration-style box), ElevenLabs, Microsoft Azure or Google Cloud, using your own API key. The key is only sent to that service and is saved only if you tick "Remember".
+   - **Reading style:** Natural, Cozy bedtime, Suspense, Nonfiction, Children's story or Dramatic. Each one sets the pace and pauses, and premium voices also change how they perform. With OpenAI you can describe each character too ("gruff old fisherman").
+   - **Natural pauses:** longer at scene breaks (`* * *`), a beat after lines that trail off…, a quick cut on interrupted lines—, and snappier back-and-forth dialogue. Each line is sent with the text around it, so premium voices keep the tone flowing.
    - **Dialogue voices:** have a second voice read everything in quotes, or give **each character their own voice**. Characters are found from lines like *“…,” said Mara*, from *she said* and from back-and-forth exchanges, with a guess at whether each one is a man or a woman. Voices are picked automatically (change any of them), each character's ▶ plays one of their own lines, and **Hear a conversation** previews the busiest scene in the book.
 3. **Export options:**
    - **M4B audiobook:** one file with chapters, cover and tags (Chrome, Edge or Safari).
