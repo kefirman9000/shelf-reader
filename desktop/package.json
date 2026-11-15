@@ -13,7 +13,8 @@
   },
   "dependencies": {
     "adm-zip": "^0.5.18",
-    "pdf-parse": "^1.1.4"
+    "pdf-parse": "^1.1.4",
+    "electron-updater": "^6.8.11"
   },
   "devDependencies": {
     "electron": "^33.2.1",
@@ -39,13 +40,22 @@
         "zip"
       ],
       "icon": "build/icon.png",
-      "artifactName": "ShelfReader-Windows.${ext}"
+      "artifactName": "ShelfReader-Windows.${ext}",
+      "verifyUpdateCodeSignature": false
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "artifactName": "ShelfReader-Setup.${ext}"
-    }
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "kefirman9000",
+        "repo": "shelf-reader",
+        "releaseType": "release"
+      }
+    ]
   }
 }

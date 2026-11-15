@@ -17,6 +17,8 @@ const REPO = 'kefirman9000/shelf-reader';
 
 function startServer(opts = {}) {
   const store = new Store(opts.dataDir || path.join(__dirname, 'testdata'));
+  const updates = opts.updates || null;
+  if (updates) { updates.setToken(store.settings().updateToken || ''); updates.setAuto(store.settings().autoUpdate !== false); }
   const version = opts.version || '1.0.0';
   let port = opts.port || 47321;
 
@@ -126,11 +128,12 @@ function startServer(opts = {}) {
       return send(res, 200, { ok: true });
     }
     if (p === '/api/library') return send(res, 200, store.list().map(bookView));
-    const pub = (st) => { const { cloud: _c, ...rest } = st; return { ...rest, cloud: cloud.publicView(st) }; };
+    const pub = (st) => { const { cloud: _c, updateToken: _t, ...rest } = st; return { ...rest, cloud: cloud.publicView(st), hasUpdateToken: !!_t }; };
     if (p === '/api/settings' && req.method === 'GET') return send(res, 200, pub(store.settings()));
     if (p === '/api/settings' && req.method === 'PUT') {
       const patch = await json(req);
-      delete patch.cloud;
+      delete patch.cloud; delete patch.updateToken;
+      if (updates && 'autoUpdate' in patch) updates.setAuto(patch.autoUpdate !== false);
       return send(res, 200, pub(store.setSettings(patch)));
     }
 
@@ -293,6 +296,19 @@ function startServer(opts = {}) {
       catch (e) { return send(res, 400, { error: e.message }); }
     }
 
+    // ---------- automatic updates (installed app) ----------
+    if (updates && p === '/api/update' && req.method === 'GET') return send(res, 200, { auto: true, ...updates.status() });
+    if (updates && p === '/api/update/check' && req.method === 'POST') return send(res, 200, { auto: true, ...(await updates.check()) });
+    if (updates && p === '/api/update/download' && req.method === 'POST') return send(res, 200, { auto: true, ...(await updates.download()) });
+    if (updates && p === '/api/update/install' && req.method === 'POST') return send(res, 200, { ok: updates.install() });
+    if (updates && p === '/api/update/token' && req.method === 'POST') {
+      const { token } = await json(req);
+      const t = String(token || '').trim();
+      if (t && !/^(github_pat_|ghp_)[A-Za-z0-9_]{20,}$/.test(t)) return send(res, 400, { error: 'That doesn\'t look like a GitHub token. It should start with github_pat_ or ghp_.' });
+      store.setSettings({ updateToken: t || undefined });
+      updates.setToken(t);
+      return send(res, 200, { auto: true, ...(await updates.check()) });
+    }
     if (p === '/api/update') {
       try {
         const j = await getJson(`https://api.github.com/repos/${REPO}/releases/latest`);

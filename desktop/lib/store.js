@@ -160,7 +160,11 @@ class Store {
     if (fs.existsSync(this.libFile())) z.addLocalFile(this.libFile());
     for (const f of fs.readdirSync(this.books)) z.addLocalFile(path.join(this.books, f), 'books');
     for (const f of fs.readdirSync(this.stateDir)) z.addLocalFile(path.join(this.stateDir, f), 'state');
-    if (fs.existsSync(this.settingsPath())) z.addLocalFile(this.settingsPath(), 'desktop');
+    if (fs.existsSync(this.settingsPath())) {
+      // keys and tokens stay on this PC
+      const { cloud: _c, updateToken: _t, ...safe } = this.settings();
+      z.addFile('desktop/' + path.basename(this.settingsPath()), Buffer.from(JSON.stringify(safe)));
+    }
     if (fs.existsSync(this.statsPath())) z.addLocalFile(this.statsPath(), 'desktop');
     return z.toBuffer();
   }

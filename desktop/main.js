@@ -6,6 +6,8 @@ const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
 const { startServer } = require('./server');
+const { createUpdater } = require('./lib/updates');
+const updates = createUpdater();
 
 let win = null;
 let port = null;
@@ -22,6 +24,7 @@ if (!app.requestSingleInstanceLock()) {
       dataDir: path.join(app.getPath('userData'), 'library'),
       port: 47321,
       version: app.getVersion(),
+      updates,
       openExternal: (url) => shell.openExternal(url),
       openEdge: (url) => shell.openExternal('microsoft-edge:' + url).catch(() => shell.openExternal(url)),
       findChrome,
@@ -42,6 +45,7 @@ if (!app.requestSingleInstanceLock()) {
       }
     });
     createWindow();
+    updates.start();
   });
 
   app.on('window-all-closed', () => app.quit());

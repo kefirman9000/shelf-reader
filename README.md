@@ -93,6 +93,8 @@ Android Auto is phone-only.
 
 ---
 
+
+**Updates:** if you installed with **ShelfReader-Setup.exe**, Shelf Reader checks for new versions by itself, downloads them in the background, and installs them the next time you restart. A **Update ready · Restart** button also appears at the top. You only need to download the installer once. (The zip version can't update itself.) While this repository is private, add a read-only GitHub token in **Settings → Updates** so the app can see new releases. Once the repository is public, no token is needed.
 ## Features
 
 ### Find books

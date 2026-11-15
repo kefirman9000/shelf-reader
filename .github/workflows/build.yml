@@ -67,10 +67,21 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
         run: npx electron-builder --win nsis zip --publish never
 
+      - name: Check update files
+        working-directory: desktop
+        shell: bash
+        run: |
+          ls -la dist
+          test -f dist/latest.yml
+          test -f dist/ShelfReader-Setup.exe.blockmap
+          cat dist/latest.yml
+
       - name: Add to release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
           files: |
             desktop/dist/ShelfReader-Setup.exe
+            desktop/dist/ShelfReader-Setup.exe.blockmap
+            desktop/dist/latest.yml
             desktop/dist/ShelfReader-Windows.zip

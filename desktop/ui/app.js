@@ -954,7 +954,7 @@ function openSettings() {
     <p class="muted">Bring your phone library here: on your phone use Menu → Back up library, copy the .zip to this PC, then restore it (or drop it on this window).</p>
     <div class="setrow"><button id="sRestore">Restore from backup…</button><a href="/api/backup" download><button>Download a backup</button></a></div>
     <h3>Updates</h3>
-    <div class="setrow"><span class="muted">Version ${esc(S.info.version || '')}</span><button id="sUpdate">Check for updates</button></div>
+    <div id="updBox"><div class="setrow"><span class="muted">Version ${esc(S.info.version || '')}</span><button id="sUpdate">Check for updates</button></div></div>
     <h3>Keyboard</h3>
     <p class="muted"><kbd>Space</kbd> play/pause · <kbd>←</kbd>/<kbd>→</kbd> turn page (Book view) or paragraph (Scroll view) · <kbd>F</kbd> full screen · <kbd>Shift</kbd>+<kbd>←</kbd>/<kbd>→</kbd> chapter · <kbd>B</kbd> bookmark · <kbd>C</kbd> chapters · <kbd>Ctrl</kbd>+<kbd>F</kbd> search in book · media keys work too</p>`,
   [['Done', null, true]]);
@@ -978,6 +978,7 @@ function openSettings() {
   $('#sRestore').onclick = () => $('#restoreInput').click();
   $('#sVoices').onclick = () => openVoiceOptions();
   $('#sUpdate').onclick = checkUpdates;
+  renderUpdateBox();
 }
 $('#restoreInput').onchange = (e) => { const f = e.target.files[0]; e.target.value = ''; if (f) restoreBackup(f); };
 async function restoreBackup(file) {
@@ -989,7 +990,61 @@ async function restoreBackup(file) {
     show('library');
   } catch (e) { toast('Restore failed: ' + e.message, 7000); }
 }
+// ---------- automatic updates (installed app) ----------
+const UPD_TEXT = {
+  idle: 'Updates are checked automatically.', checking: 'Checking for updates…', uptodate: 'You have the newest version.',
+  available: 'An update is available.', downloading: 'Downloading the update…', ready: 'An update is ready. It installs when you restart.',
+  error: '', portable: 'You\'re running the zip version, which can\'t update itself. Install once with ShelfReader-Setup.exe (your library is kept) and updates will then arrive automatically.',
+  dev: 'Updates are turned off while developing.'
+};
+async function renderUpdateBox() {
+  const box = $('#updBox'); if (!box) return;
+  let u; try { u = await api('/api/update'); } catch (_) { return; }
+  if (!u.auto) return;   // running outside the app: the simple check stays
+  const msg = u.status === 'error' ? `<span style="color:#e06c6c">${esc(u.error)}</span>` : u.status === 'downloading' ? `${UPD_TEXT.downloading} ${u.progress || 0}%` : UPD_TEXT[u.status] || '';
+  box.innerHTML = `
+    <div class="setrow"><span>Version <b>${esc(u.current)}</b>${u.latest && u.latest !== u.current ? ` · newest ${esc(u.latest)}` : ''}</span></div>
+    <p class="muted">${msg}${u.checkedAt ? ` <span class="muted">(checked ${new Date(u.checkedAt).toLocaleTimeString()})</span>` : ''}</p>
+    <div class="setrow">
+      ${u.status === 'ready' ? '<button id="uInstall" class="primary">Restart and update</button>' : ''}
+      ${u.status === 'available' ? '<button id="uDownload" class="primary">Download the update</button>' : ''}
+      ${u.status === 'portable' ? '<button id="uRelease">Open the download page</button>' : '<button id="uCheck">Check now</button>'}
+    </div>
+    ${u.status !== 'portable' && u.status !== 'dev' ? `<label class="check"><input type="checkbox" id="uAuto" ${S.settings.autoUpdate !== false ? 'checked' : ''}> Download updates automatically (they install the next time you restart Shelf Reader)</label>
+    <details ${u.status === 'error' && !u.hasToken ? 'open' : ''}><summary>Private repository? Add a GitHub token</summary>
+      <p class="muted">While the GitHub repository is private, GitHub only shares updates with your account. Make a read-only token: on GitHub open <b>Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token</b>, choose <b>Only select repositories → shelf-reader</b>, set <b>Contents</b> to <b>Read-only</b>, and paste it here. It stays on this PC. (If you make the repository public, no token is needed.)</p>
+      <div class="setrow"><input id="uToken" type="password" placeholder="${u.hasToken ? 'A token is saved. Paste a new one to replace it' : 'github_pat_…'}" style="flex:1"><button id="uTokenSave">Save</button>${u.hasToken ? '<button id="uTokenDel" class="danger">Remove</button>' : ''}</div>
+    </details>` : ''}`;
+  const on = (id, fn) => { const el = $(id); if (el) el.onclick = fn; };
+  on('#uCheck', async () => { $('#uCheck').disabled = true; await api('/api/update/check', { method: 'POST' }).catch(() => {}); pollUpdates(); renderUpdateBox(); });
+  on('#uDownload', async () => { api('/api/update/download', { method: 'POST' }).catch(() => {}); setTimeout(renderUpdateBox, 800); });
+  on('#uInstall', installUpdate);
+  on('#uRelease', () => api('/api/open-url', { method: 'POST', json: { url: 'https://github.com/kefirman9000/shelf-reader/releases/latest' } }));
+  on('#uTokenSave', async () => {
+    try { await api('/api/update/token', { method: 'POST', json: { token: $('#uToken').value } }); toast('Token saved. Checking for updates…'); pollUpdates(); renderUpdateBox(); }
+    catch (e) { toast(e.message, 7000); }
+  });
+  on('#uTokenDel', async () => { await api('/api/update/token', { method: 'POST', json: { token: '' } }).catch(() => {}); renderUpdateBox(); });
+  const a = $('#uAuto'); if (a) a.onchange = () => saveSettings({ autoUpdate: a.checked });
+  if (u.status === 'checking' || u.status === 'downloading') setTimeout(renderUpdateBox, 1500);
+}
+async function installUpdate() {
+  if (S.playing) { try { pause(); } catch (_) {} }
+  toast('Restarting to update…', 10000);
+  await api('/api/update/install', { method: 'POST' }).catch(() => {});
+}
+/** Shows a small "Update ready" button in the top bar when an update has downloaded. */
+async function pollUpdates() {
+  clearTimeout(pollUpdates.t);
+  let u; try { u = await api('/api/update'); } catch (_) { return; }
+  if (!u.auto) return;
+  const b = $('#updBtn');
+  b.hidden = u.status !== 'ready';
+  if (u.status === 'ready') { b.textContent = `Update ready (${u.latest}) · Restart`; b.onclick = installUpdate; }
+  pollUpdates.t = setTimeout(pollUpdates, u.status === 'checking' || u.status === 'downloading' ? 4000 : 10 * 60 * 1000);
+}
 async function checkUpdates() {
+  try { const u = await api('/api/update'); if (u.auto) { await api('/api/update/check', { method: 'POST' }); renderUpdateBox(); pollUpdates(); return; } } catch (_) {}
   try {
     const u = await api('/api/update');
     if (u.newer) {
@@ -1071,6 +1126,7 @@ bkInit();
     saveSettings({ seenTip: true });
     toast('Tip: “Better voices” opens your library in Edge (Microsoft natural voices) or Chrome (Google voices).', 8000);
   }
+  setTimeout(pollUpdates, 15000);
   if (S.settings.lastBook && bookById(S.settings.lastBook)) {
     try { await loadBook(S.settings.lastBook); } catch (_) {}
   }
