@@ -132,9 +132,18 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
         }
     }
 
+    /** Counts listening time for the reading stats (every 30 s while playing). */
+    private val statsTick = object : Runnable {
+        override fun run() {
+            if (playing) try { Stats.add(this@TtsService, 0, 30) } catch (t: Throwable) {}
+            main.postDelayed(this, 30_000)
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
         instance = this
+        main.postDelayed(statsTick, 30_000)
         audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         getSystemService(NotificationManager::class.java)
             .createNotificationChannel(NotificationChannel(CHANNEL, "Reading aloud", NotificationManager.IMPORTANCE_LOW))
@@ -418,6 +427,7 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
         if (id != null && segs.isNotEmpty() && segIndex >= segs.size - 3) {
             Collections.add(this, id, Collections.FINISHED)
             Collections.set(this, id, Collections.of(this, id) - Collections.WANT)
+            Library.get(this, id)?.let { Stats.finished(this, it) }
         }
         playing = false
         releaseWake()
@@ -619,6 +629,7 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
         instance = null
         gen++
         main.removeCallbacks(sleepTick)
+        main.removeCallbacks(statsTick)
         try { audioManager.unregisterAudioDeviceCallback(deviceCallback) } catch (e: Throwable) {}
         try { unregisterReceiver(noisyReceiver) } catch (e: Throwable) {}
         tts?.stop()

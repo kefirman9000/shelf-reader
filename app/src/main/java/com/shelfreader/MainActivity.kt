@@ -251,6 +251,7 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         if (!showingSearch) refreshLibrary()
+        if (Settings.syncUri(this) != null && System.currentTimeMillis() - Settings.lastSync(this) > 60_000) runSync(false)
     }
 
     override fun onDestroy() {
@@ -269,12 +270,15 @@ class MainActivity : Activity() {
         menu.add(0, 4, 0, "Resume when headphones connect").setCheckable(true).isChecked = Settings.resumeOnHeadphones(this)
         menu.add(0, 5, 0, "Back up library…")
         menu.add(0, 6, 0, "Restore from backup…")
+        menu.add(0, 7, 0, "Reading stats")
+        menu.add(0, 8, 0, if (Settings.syncUri(this) == null) "Sync with PC…" else "Sync with PC (on)…")
         menu.add(0, 2, 0, "Check for updates")
         return true
     }
 
     override fun onPrepareOptionsMenu(menu: Menu): Boolean {
         menu.findItem(4)?.isChecked = Settings.resumeOnHeadphones(this)
+        menu.findItem(8)?.title = if (Settings.syncUri(this) == null) "Sync with PC…" else "Sync with PC (on)…"
         return super.onPrepareOptionsMenu(menu)
     }
 
@@ -307,9 +311,63 @@ class MainActivity : Activity() {
                     )
                 } catch (e: Throwable) { toast("No file picker available") }
             }
+            7 -> showStats(this)
+            8 -> syncMenu()
             else -> return super.onOptionsItemSelected(item)
         }
         return true
+    }
+
+    // ---------- phone ↔ PC sync ----------
+
+    private fun syncMenu() {
+        val on = Settings.syncUri(this) != null
+        val last = Settings.lastSync(this)
+        val msg = if (on) "Your place, bookmarks, highlights, notes, collections and reading stats are kept in step with the PC app through a ShelfReader-sync.json file." +
+            (if (last > 0) "\n\nLast synced: " + java.text.DateFormat.getDateTimeInstance().format(Date(last)) else "")
+        else "Keep your place, bookmarks, highlights, notes, collections and stats the same on this phone and your PC.\n\n" +
+            "1. In the PC app, open Settings → Sync and pick a folder in Google Drive or OneDrive.\n" +
+            "2. Here, tap “Choose the sync file” and pick ShelfReader-sync.json in that same folder (in the Drive or OneDrive section of the file picker).\n\n" +
+            "No PC yet? Tap “Create a new sync file” to make one in Drive, then point the PC app at that folder.\n\nBooks themselves aren't copied — add them on both devices."
+        val b = AlertDialog.Builder(this).setTitle("Sync with PC").setMessage(msg)
+        if (on) {
+            b.setPositiveButton("Sync now") { _, _ -> runSync(true) }
+            b.setNeutralButton("Turn off") { _, _ -> Settings.setSyncUri(this, null); toast("Sync turned off") }
+            b.setNegativeButton("Change file…") { _, _ -> pickSyncFile(false) }
+        } else {
+            b.setPositiveButton("Choose the sync file") { _, _ -> pickSyncFile(false) }
+            b.setNeutralButton("Create a new sync file") { _, _ -> pickSyncFile(true) }
+            b.setNegativeButton("Cancel", null)
+        }
+        b.show()
+    }
+
+    private fun pickSyncFile(create: Boolean) {
+        try {
+            val i = if (create) Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
+                .setType("application/json").putExtra(Intent.EXTRA_TITLE, "ShelfReader-sync.json")
+            else Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*")
+            @Suppress("DEPRECATION")
+            startActivityForResult(i, 47)
+        } catch (e: Throwable) { toast("No file picker available") }
+    }
+
+    private var syncing = false
+
+    private fun runSync(announce: Boolean) {
+        if (syncing || Settings.syncUri(this) == null) return
+        syncing = true
+        pool.execute {
+            val msg = try {
+                val (pulled, pushed) = SyncFile.sync(this)
+                "Synced: $pulled book${if (pulled == 1) "" else "s"} updated from the other device, $pushed in the sync file."
+            } catch (t: Throwable) { "Sync failed: ${t.message}" }
+            runOnUiThread {
+                syncing = false
+                if (announce || msg.startsWith("Sync failed")) toast(msg)
+                if (!showingSearch) refreshLibrary()
+            }
+        }
     }
 
     private fun showTab(search: Boolean) {
@@ -794,6 +852,14 @@ class MainActivity : Activity() {
                 } catch (t: Throwable) { "Restore failed: ${t.message}" }
                 runOnUiThread { toast(msg); refreshLibrary() }
             }
+        }
+        if (requestCode == 47 && resultCode == RESULT_OK) {
+            val uri = data?.data ?: return
+            try {
+                contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+            } catch (e: Throwable) {}
+            Settings.setSyncUri(this, uri.toString())
+            runSync(true)
         }
         if (requestCode == 44 && resultCode == RESULT_OK) {
             val uri = data?.data ?: return

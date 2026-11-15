@@ -11,6 +11,7 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import java.util.Locale
 
 const val MATCH = -1
 const val WRAP = -2
@@ -166,5 +167,54 @@ fun showVoiceGuide(act: Activity) {
             }
         }
         .setNegativeButton("Later", null)
+        .show()
+}
+
+/** Reading stats: today's minutes against a daily goal, streak, the last 14 days, and finished books. */
+fun showStats(act: android.app.Activity) {
+    val o = Stats.load(act)
+    val goal = Stats.goal(act)
+    val fmt = java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US)
+    val cal = java.util.Calendar.getInstance()
+    val today = Stats.minutes(o, fmt.format(cal.time))
+    // streak: days in a row (ending today, or yesterday if nothing yet today) with at least a minute
+    var streak = 0
+    val c = java.util.Calendar.getInstance()
+    if (today == 0) c.add(java.util.Calendar.DAY_OF_YEAR, -1)
+    while (Stats.minutes(o, fmt.format(c.time)) > 0) { streak++; c.add(java.util.Calendar.DAY_OF_YEAR, -1) }
+    val sb = StringBuilder()
+    sb.append("Today: $today of $goal minutes").append(if (today >= goal) "  ✓ goal reached!" else "").append("\n")
+    sb.append("Streak: $streak day${if (streak == 1) "" else "s"}\n\nLast 14 days\n")
+    val d = java.util.Calendar.getInstance(); d.add(java.util.Calendar.DAY_OF_YEAR, -13)
+    val dayName = java.text.SimpleDateFormat("EEE d", Locale.getDefault())
+    val days = (0 until 14).map { val k = fmt.format(d.time); val n = dayName.format(d.time); d.add(java.util.Calendar.DAY_OF_YEAR, 1); n to Stats.minutes(o, k) }
+    val top = maxOf(goal, days.maxOf { it.second }, 1)
+    for ((n, m) in days) {
+        val bar = "█".repeat((m * 14 + top - 1) / top)
+        sb.append(n.padEnd(7)).append(" ").append(bar).append(if (m > 0) " $m" else " ·").append("\n")
+    }
+    val fin = o.optJSONArray("finished")
+    if (fin != null && fin.length() > 0) {
+        sb.append("\nFinished (${fin.length()})\n")
+        for (i in fin.length() - 1 downTo maxOf(0, fin.length() - 15)) {
+            val f = fin.getJSONObject(i)
+            sb.append("• ").append(f.optString("title")).append(" — ").append(f.optString("date").take(10)).append("\n")
+        }
+    }
+    val tv = android.widget.TextView(act).apply {
+        text = sb.toString()
+        typeface = Typeface.MONOSPACE
+        textSize = 14f
+        setPadding(act.dp(20), act.dp(12), act.dp(20), act.dp(12))
+    }
+    android.app.AlertDialog.Builder(act).setTitle("Reading stats")
+        .setView(android.widget.ScrollView(act).apply { addView(tv) })
+        .setPositiveButton("Close", null)
+        .setNeutralButton("Daily goal…") { _, _ ->
+            val opts = listOf(10, 15, 20, 30, 45, 60, 90, 120)
+            android.app.AlertDialog.Builder(act).setTitle("Daily reading + listening goal")
+                .setItems(opts.map { "$it minutes" }.toTypedArray()) { _, w -> Stats.setGoal(act, opts[w]); showStats(act) }
+                .show()
+        }
         .show()
 }

@@ -17,7 +17,17 @@ data class Book(
 data class Chapter(val title: String, val para: Int)
 data class Picture(val para: Int, val src: String)
 data class Doc(val paras: List<String>, val chapters: List<Chapter>, val pictures: List<Picture> = emptyList())
-data class Note(val para: Int, val text: String, val time: Long)
+/** A bookmark (no text), a note, or a highlight (type "hl", with a character range and colour). */
+data class Note(
+    val para: Int,
+    val text: String,
+    val time: Long,
+    val type: String = "note",
+    val start: Int = 0,
+    val end: Int = 0,
+    val color: String = "yellow",
+    val quote: String = ""
+)
 
 object Library {
     private fun indexFile(ctx: Context) = File(ctx.filesDir, "library.json")
@@ -152,8 +162,16 @@ object Library {
     fun offset(ctx: Context, id: String) = prefs(ctx).getInt("off_$id", 0)
 
     fun setPosition(ctx: Context, id: String, para: Int, offset: Int = 0) {
-        prefs(ctx).edit().putInt("pos_$id", para).putInt("off_$id", offset).apply()
+        prefs(ctx).edit().putInt("pos_$id", para).putInt("off_$id", offset).putLong("upd_$id", System.currentTimeMillis()).apply()
     }
+
+    /** Last time this book's place, notes or collections changed (for phone ↔ PC sync). */
+    fun updated(ctx: Context, id: String) = prefs(ctx).getLong("upd_$id", 0L)
+    fun touch(ctx: Context, id: String) = prefs(ctx).edit().putLong("upd_$id", System.currentTimeMillis()).apply()
+    fun applySynced(ctx: Context, id: String, para: Int, offset: Int, updated: Long) {
+        prefs(ctx).edit().putInt("pos_$id", para).putInt("off_$id", offset).putLong("upd_$id", updated).apply()
+    }
+    fun length(ctx: Context, id: String) = prefs(ctx).getInt("len_$id", 0)
 
     fun percent(ctx: Context, b: Book): Int {
         val len = prefs(ctx).getInt("len_${b.id}", 0)
@@ -173,18 +191,67 @@ object Library {
             val arr = JSONArray(f.readText())
             (0 until arr.length()).map {
                 val o = arr.getJSONObject(it)
-                Note(o.getInt("p"), o.optString("t"), o.optLong("time"))
-            }.sortedBy { it.para }.toMutableList()
+                Note(o.getInt("p"), o.optString("t"), o.optLong("time"), o.optString("type", "note"),
+                    o.optInt("s"), o.optInt("e"), o.optString("c", "yellow"), o.optString("q"))
+            }.sortedWith(compareBy({ it.para }, { it.start })).toMutableList()
         } catch (t: Throwable) {
             mutableListOf()
         }
     }
 
     @Synchronized
-    fun saveNotes(ctx: Context, id: String, list: List<Note>) {
+    fun saveNotes(ctx: Context, id: String, list: List<Note>, touch: Boolean = true) {
         val arr = JSONArray()
-        for (n in list) arr.put(JSONObject().apply { put("p", n.para); put("t", n.text); put("time", n.time) })
+        for (n in list) arr.put(JSONObject().apply {
+            put("p", n.para); put("t", n.text); put("time", n.time); put("type", n.type)
+            if (n.type == "hl") { put("s", n.start); put("e", n.end); put("c", n.color); put("q", n.quote) }
+        })
         notesFile(ctx, id).writeText(arr.toString())
+        if (touch) touch(ctx, id)
+    }
+}
+
+/** Reading time per day, books finished, and a daily goal. */
+object Stats {
+    private fun p(ctx: Context) = ctx.getSharedPreferences("stats", Context.MODE_PRIVATE)
+    fun today(): String = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date())
+
+    @Synchronized
+    fun load(ctx: Context): JSONObject = try { JSONObject(p(ctx).getString("json", "{}")) } catch (t: Throwable) { JSONObject() }
+
+    @Synchronized
+    fun save(ctx: Context, o: JSONObject) = p(ctx).edit().putString("json", o.toString()).apply()
+
+    @Synchronized
+    fun add(ctx: Context, read: Int, listen: Int) {
+        val o = load(ctx)
+        val days = o.optJSONObject("days") ?: JSONObject().also { o.put("days", it) }
+        val d = days.optJSONObject(today()) ?: JSONObject().also { days.put(today(), it) }
+        d.put("read", d.optInt("read") + read)
+        d.put("listen", d.optInt("listen") + listen)
+        save(ctx, o)
+    }
+
+    @Synchronized
+    fun finished(ctx: Context, b: Book) {
+        val o = load(ctx)
+        val arr = o.optJSONArray("finished") ?: JSONArray().also { o.put("finished", it) }
+        val date = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US).format(java.util.Date())
+        for (i in 0 until arr.length()) {
+            val f = arr.getJSONObject(i)
+            if (f.optString("id") == b.id && f.optString("date").take(10) == date.take(10)) return
+        }
+        arr.put(JSONObject().apply { put("id", b.id); put("title", b.title); put("author", b.author); put("date", date) })
+        save(ctx, o)
+    }
+
+    fun goal(ctx: Context) = load(ctx).optInt("goal", 30)
+    fun setGoal(ctx: Context, g: Int) { val o = load(ctx); o.put("goal", g); o.put("goalUpdated", System.currentTimeMillis()); save(ctx, o) }
+
+    /** Minutes read + listened on a day ("yyyy-MM-dd"). */
+    fun minutes(o: JSONObject, day: String): Int {
+        val d = o.optJSONObject("days")?.optJSONObject(day) ?: return 0
+        return (d.optInt("read") + d.optInt("listen")) / 60
     }
 }
 
@@ -230,6 +297,30 @@ object Settings {
 
     fun lastBook(ctx: Context): String? = p(ctx).getString("lastBook", null)
     fun setLastBook(ctx: Context, id: String) = p(ctx).edit().putString("lastBook", id).apply()
+
+    fun layout(ctx: Context): String = p(ctx).getString("layout", "book") ?: "book"
+    fun setLayout(ctx: Context, v: String) = p(ctx).edit().putString("layout", v).apply()
+    fun pageTurn(ctx: Context): String = p(ctx).getString("pageTurn", "slide") ?: "slide"
+    fun setPageTurn(ctx: Context, v: String) = p(ctx).edit().putString("pageTurn", v).apply()
+    fun nightOn(ctx: Context) = p(ctx).getBoolean("nightOn", false)
+    fun nightFrom(ctx: Context) = p(ctx).getInt("nightFrom", 21 * 60)
+    fun nightTo(ctx: Context) = p(ctx).getInt("nightTo", 7 * 60)
+    fun nightTheme(ctx: Context) = p(ctx).getInt("nightTheme", 3)
+    fun setNight(ctx: Context, on: Boolean, from: Int, to: Int, theme: Int) =
+        p(ctx).edit().putBoolean("nightOn", on).putInt("nightFrom", from).putInt("nightTo", to).putInt("nightTheme", theme).apply()
+    /** The theme to use right now (the night theme during the scheduled hours). */
+    fun effectiveTheme(ctx: Context): Int {
+        if (!nightOn(ctx)) return theme(ctx)
+        val c = java.util.Calendar.getInstance()
+        val now = c.get(java.util.Calendar.HOUR_OF_DAY) * 60 + c.get(java.util.Calendar.MINUTE)
+        val a = nightFrom(ctx); val b = nightTo(ctx)
+        val night = if (a <= b) now in a until b else now >= a || now < b
+        return if (night) nightTheme(ctx) else theme(ctx)
+    }
+    fun syncUri(ctx: Context): String? = p(ctx).getString("syncUri", null)
+    fun setSyncUri(ctx: Context, v: String?) = p(ctx).edit().putString("syncUri", v).apply()
+    fun lastSync(ctx: Context) = p(ctx).getLong("lastSync", 0L)
+    fun setLastSync(ctx: Context, t: Long) = p(ctx).edit().putLong("lastSync", t).apply()
 
     fun lastUpdateCheck(ctx: Context) = p(ctx).getLong("lastUpdateCheck", 0L)
     fun setLastUpdateCheck(ctx: Context, t: Long) = p(ctx).edit().putLong("lastUpdateCheck", t).apply()
@@ -284,8 +375,9 @@ object Collections {
         (0 until arr.length()).map { arr.getString(it) }.toSet()
     } catch (t: Throwable) { emptySet() }
 
-    fun set(ctx: Context, bookId: String, names: Set<String>) {
+    fun set(ctx: Context, bookId: String, names: Set<String>, touch: Boolean = true) {
         p(ctx).edit().putString(bookId, JSONArray(names.toList()).toString()).apply()
+        if (touch) Library.touch(ctx, bookId)
     }
 
     fun add(ctx: Context, bookId: String, name: String) = set(ctx, bookId, of(ctx, bookId) + name)
