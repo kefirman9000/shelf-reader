@@ -8,7 +8,6 @@ const path = require('path');
 const { Store } = require('./lib/store');
 const { SOURCES, resolveArchive, getBuffer, getJson, define } = require('./lib/sources');
 const { epubInfo } = require('./lib/extract');
-const exporter = require('./lib/export');
 const cloud = require('./lib/cloud');
 
 const UI_DIR = path.join(__dirname, 'ui');
@@ -82,23 +81,11 @@ function startServer(opts = {}) {
     if (p === '/api/info') {
       return send(res, 200, {
         version, edge: !!opts.openEdge, chrome: !!(opts.findChrome && opts.findChrome()),
-        desktop: !!opts.openExternal, export: exporter.supported() && !!opts.pickFolder
+        desktop: !!opts.openExternal, export: !!opts.pickFolder
       });
     }
 
-    // ---------- audio export (Windows voices → MP3) ----------
-    if (p === '/api/export/voices') {
-      try { return send(res, 200, await exporter.windowsVoices()); } catch (e) { return send(res, 500, { error: e.message }); }
-    }
-    if (p === '/api/export' && req.method === 'GET') {
-      const { child, ...view } = job;
-      return send(res, 200, view);
-    }
-    if (p === '/api/export/cancel' && req.method === 'POST') {
-      job.cancelled = true;
-      try { if (job.child) job.child.kill(); } catch (_) {}
-      return send(res, 200, { ok: true });
-    }
+    // ---------- audio export (natural / premium voices; MP3s are made on screen) ----------
     if (p === '/api/export/begin' && req.method === 'POST') {
       if (!opts.pickFolder) return send(res, 400, { error: 'Audio export works in the Windows app.' });
       if (job.running) return send(res, 409, { error: 'An export is already running.' });
@@ -120,23 +107,6 @@ function startServer(opts = {}) {
     if (p === '/api/export/open' && req.method === 'POST') {
       if (job.folder && opts.openPath) opts.openPath(job.folder);
       return send(res, 200, { ok: true });
-    }
-    if (p === '/api/export' && req.method === 'POST') {
-      if (!exporter.supported() || !opts.pickFolder) return send(res, 400, { error: 'Audio export works in the Windows app.' });
-      if (job.running) return send(res, 409, { error: 'An export is already running.' });
-      const r = await json(req);
-      const b = store.get(r.bookId);
-      if (!b) return send(res, 404, { error: 'not found' });
-      const folder = await opts.pickFolder();
-      if (!folder) return send(res, 200, { cancelled: true });
-      const doc = await store.doc(b);
-      Object.keys(job).forEach((k) => delete job[k]);
-      Object.assign(job, { running: true, title: b.title, done: 0, total: 0, current: '', error: null, finished: false });
-      exporter.runExport(job, { book: b, doc, settings: store.settings(), from: r.from || 0, to: r.to ?? 9999, voice: r.voice || null, rate: r.rate || 1, folder })
-        .then(() => { job.finished = true; })
-        .catch((e) => { job.error = job.cancelled ? 'Export cancelled.' : e.message; })
-        .finally(() => { job.running = false; job.child = null; });
-      return send(res, 200, { started: true });
     }
     if (p === '/api/library') return send(res, 200, store.list().map(bookView));
     const pub = (st) => { const { cloud: _c, ...rest } = st; return { ...rest, cloud: cloud.publicView(st) }; };

@@ -13,7 +13,6 @@
   },
   "dependencies": {
     "adm-zip": "^0.5.18",
-    "lamejs": "^1.2.1",
     "pdf-parse": "^1.1.4"
   },
   "devDependencies": {

@@ -879,7 +879,7 @@ function openSettings() {
     <div class="setrow"><button id="sVoices" class="primary">Voice options: natural &amp; premium voices…</button></div>
     <label class="check"><input type="checkbox" id="sClutter" ${s.skipClutter !== false ? 'checked' : ''}> Skip page numbers, footnote markers, links and scan notices</label>
     <p class="muted">Best voices: ${S.info.edge ? 'click <b>Better voices</b> at the top to open your library in Edge (Microsoft “Natural ★” voices) or Chrome (Google voices). ' : 'in Edge pick a voice marked “Natural ★”; in Chrome pick a “Google” voice. '}
-      In this window, voices come from Windows (Settings → Time &amp; language → Speech → Add voices).</p>
+      In this window, the built-in voices come from Windows.</p>
     <h3>Pronunciation fixes</h3>
     <div id="fixList">${(s.fixes || []).map((f, i) => `<div class="fix"><span style="flex:1"><b>${esc(f.from)}</b> → ${esc(f.to || '(skip)')}</span><button class="danger" data-fx="${i}">Delete</button></div>`).join('') || '<p class="muted">None yet.</p>'}</div>
     <div class="setrow"><input id="fxFrom" placeholder="Word as written" style="flex:1"><input id="fxTo" placeholder="Say it as" style="flex:1"><button id="fxAdd">Add</button></div>
@@ -949,59 +949,36 @@ $('#edgeBtn').onclick = (e) => {
 };
 
 // ---------- audio export (Windows app) ----------
-$('#exportBtn').onclick = async () => {
+$('#exportBtn').onclick = () => {
   if (!S.book) return;
-  let voices = [];
-  try { voices = await api('/api/export/voices'); } catch (_) {}
+  const groups = extraVoiceOptions();
+  if (!groups.length) {
+    modal(`<h2>Export as MP3</h2><p>Exporting needs a natural voice. Install the free <b>Kokoro</b> voices (a one-time download) or a <b>Piper</b> voice, or add a premium voice key, then come back here.</p>`,
+      [['Cancel'], ['Open Voice options', () => openVoiceOptions(), true]]);
+    return;
+  }
   const cur = chapterIndex(curPara());
   const nCh = Math.max(1, S.chapters.length);
+  const curVid = currentVoiceName();
   modal(`<h2>Export as MP3</h2>
-    <p class="muted">Saves audio files (one per chapter) to a folder you choose, for any music player or phone.
-    (The Edge and Google browser voices can't be recorded, so they aren't listed here.)</p>
+    <p class="muted">Saves audio files (one per chapter) to a folder you choose, for any music player or phone.</p>
     <div class="setrow"><label>What</label><select id="xWhat">
       ${S.chapters.length ? `<option value="cur">This chapter: ${esc(S.chapters[Math.max(0, cur)].title)}</option>` : ''}
       <option value="all">Whole book (${nCh} file${nCh === 1 ? '' : 's'})</option></select></div>
     <div class="setrow"><label>Voice</label><select id="xVoice">
-      ${extraVoiceOptions().map(([label, items]) => `<optgroup label="${esc(label)}">${items.map(([v, l]) => `<option value="${esc(v)}" ${v === currentVoiceName() ? 'selected' : ''}>${esc(l)}</option>`).join('')}</optgroup>`).join('')}
-      <optgroup label="Windows voices">${voices.length
-      ? voices.map((v) => `<option value="${esc(v.name)}">${esc(voiceLabel(v.name, v.lang, v.gender && v.gender !== 'NotSet' ? v.gender : ''))}</option>`).join('')
-      : '<option value="">Windows default voice</option>'}</optgroup></select></div>
-    <p class="muted">Natural voices (Kokoro, Piper) and premium voices make much better audiobooks. Premium voices are billed by your provider.</p>
+      ${groups.map(([label, items]) => `<optgroup label="${esc(label)}">${items.map(([v, l]) => `<option value="${esc(v)}" ${v === curVid ? 'selected' : ''}>${esc(l)}</option>`).join('')}</optgroup>`).join('')}
+    </select></div>
     <div class="setrow"><label>Speed</label><select id="xRate">${RATES.map((r) => `<option value="${r}" ${r === currentRate() ? 'selected' : ''}>${r}×</option>`).join('')}</select></div>
-    <p class="muted">More Windows voices: Settings → Time &amp; language → Speech → Add voices.</p>`,
-  [['Cancel'], ['Choose folder & export', async () => {
+    <p class="muted">Premium voices are billed by your provider. Browser and Windows voices can't be recorded, so they aren't listed.</p>`,
+  [['Cancel'], ['Choose folder & export', () => {
     const what = $('#xWhat').value;
-    const body = { bookId: S.book.id, voice: $('#xVoice').value || null, rate: +$('#xRate').value,
-      from: what === 'cur' ? Math.max(0, cur) : 0, to: what === 'cur' ? Math.max(0, cur) : 9999 };
-    if (body.voice && engineOf(body.voice) !== 'browser') {
-      if (S.playing) pause();
-      return browserExport({ from: body.from, to: body.to, vid: body.voice, rate: body.rate });
-    }
-    try {
-      const r = await api('/api/export', { method: 'POST', json: body });
-      if (r.started) watchExport();
-    } catch (e) { toast(e.message, 6000); }
+    if (S.playing) pause();
+    browserExport({
+      from: what === 'cur' ? Math.max(0, cur) : 0, to: what === 'cur' ? Math.max(0, cur) : 9999,
+      vid: $('#xVoice').value, rate: +$('#xRate').value
+    });
   }, true]]);
 };
-function watchExport() {
-  const tick = async () => {
-    let j; try { j = await api('/api/export'); } catch (_) { return; }
-    if (j.running) {
-      $('#toast').hidden = false;
-      $('#toast').innerHTML = `Exporting “${esc(j.title)}”: ${j.done}/${j.total || '?'} files${j.current ? ' · ' + esc(j.current) : ''} <button id="xCancel" style="margin-left:10px">Cancel</button>`;
-      $('#xCancel').onclick = () => api('/api/export/cancel', { method: 'POST' });
-      clearTimeout(toastTimer);
-      setTimeout(tick, 1500);
-    } else if (j.finished) {
-      $('#toast').hidden = true;
-      modal(`<h2>Export finished</h2><p>Saved ${j.total} MP3 file${j.total === 1 ? '' : 's'} to:<br><span class="muted">${esc(j.folder)}</span></p>`,
-        [['Close'], ['Open folder', () => api('/api/export/open', { method: 'POST' }), true]]);
-    } else {
-      toast(j.error ? 'Export: ' + j.error : 'Export stopped.', 7000);
-    }
-  };
-  tick();
-}
 
 // ---------- start ----------
 (async function init() {

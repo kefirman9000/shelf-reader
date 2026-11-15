@@ -52,7 +52,7 @@ The desktop app has the same library, cover shelf, search, reader, chapters, boo
   - **Premium cloud voices** with your own API key: **OpenAI**, **ElevenLabs**, **Microsoft Azure** and **Google Cloud** (Chirp 3 HD, Neural2, Studio). You pay the provider for what you use. Keys stay on your PC.
 - **Better voices ▾** can also open your library in **Edge** (Microsoft's natural voices) or **Chrome** (Google's voices). Keep the app running while you listen there.
 - **Readable voice names** like *Aria · English (US) · Female · Natural ★* or *Google · English (UK) · Male*. Choosing a voice plays a short preview.
-- **Export as MP3:** in a book, click **Export audio** to save a chapter or the whole book (one file per chapter) with a Kokoro, Piper, premium or Windows voice. The Edge and Google browser voices can't be recorded.
+- **Export as MP3:** in a book, click **Export audio** to save a chapter or the whole book (one file per chapter) with a Kokoro, Piper or premium voice. Browser and Windows voices can't be recorded.
 - **Bring your phone library over:** on the phone use *Menu → Back up library*, copy the `.zip` to your PC, and drop it on the app window (or *Settings → Restore from backup*). Books, places, notes and collections come across.
 - **Keyboard:** <kbd>Space</kbd> play/pause, <kbd>←</kbd>/<kbd>→</kbd> paragraph, <kbd>Shift</kbd>+<kbd>←</kbd>/<kbd>→</kbd> chapter, <kbd>B</kbd> bookmark, <kbd>C</kbd> chapters, <kbd>Ctrl</kbd>+<kbd>F</kbd> search. Media keys work too.
 - **Drag and drop** EPUB, PDF or TXT files onto the window to add them.
