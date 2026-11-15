@@ -554,10 +554,15 @@ function fillVoiceSelect() {
     .sort((a, b) => (isGreatVoice(b) - isGreatVoice(a)) || voiceName(a).localeCompare(voiceName(b)));
   const others = S.voices.filter((v) => !vs.includes(v));
   const cur = currentVoiceName();
-  sel.innerHTML = `<option value="">Default voice</option>` +
+  const extra = extraVoiceOptions();
+  const extraHtml = extra.map(([label, items]) => `<optgroup label="${esc(label)}">${items.map(([v, l]) => `<option value="${esc(v)}">${esc(l)}</option>`).join('')}</optgroup>`).join('');
+  sel.innerHTML = `<option value="">Default voice</option><option value="__more">＋ More natural &amp; premium voices…</option>` + extraHtml +
+    `<optgroup label="${/Electron/.test(navigator.userAgent) ? 'Windows voices' : 'Browser voices'}">` +
     vs.map((v) => `<option value="${esc(v.name)}">${esc(voiceName(v))}</option>`).join('') +
+    '</optgroup>' +
     (others.length ? `<optgroup label="Other languages">${others.map((v) => `<option value="${esc(v.name)}">${esc(voiceName(v))}</option>`).join('')}</optgroup>` : '');
-  sel.value = S.voices.some((v) => v.name === cur) ? cur : '';
+  const known = [...sel.options].some((o) => o.value === cur);
+  sel.value = known ? cur : '';
 }
 const currentVoiceName = () => (S.bookState && S.bookState.voice !== undefined ? S.bookState.voice : S.settings.voice) || '';
 const currentRate = () => (S.bookState && S.bookState.rate) || S.settings.rate || 1;
@@ -569,13 +574,24 @@ $('#rateSel').onchange = async (e) => {
   if (S.playing) speakFrom(S.segIdx);
 };
 $('#voiceSel').onchange = async (e) => {
+  if (e.target.value === '__more') { fillVoiceSelect(); openVoiceOptions(); return; }
   const v = e.target.value || null;
   await saveState({ voice: v }); saveSettings({ voice: v });
   if (S.playing) speakFrom(S.segIdx);
   else previewVoice(v);
 };
-function previewVoice(name) {
-  speechSynthesis.cancel();
+const PREVIEW = new Audio();
+async function previewVoice(name) {
+  speechSynthesis.cancel(); PREVIEW.pause();
+  if (engineOf(name) !== 'browser') {
+    toast(engineReady(name) ? 'Playing a sample…' : 'Loading the voice for a sample…', 4000);
+    try {
+      const r = await genAudio(name, 'Hello! This is how I will sound reading your book.', currentRate());
+      PREVIEW.src = URL.createObjectURL(r.blob); PREVIEW.preservesPitch = true; PREVIEW.playbackRate = r.extra || 1;
+      await PREVIEW.play();
+    } catch (e) { toast('Couldn’t play a sample: ' + e.message, 7000); }
+    return;
+  }
   const u = new SpeechSynthesisUtterance('Hello! This is how I will sound reading your book.');
   const v = S.voices.find((x) => x.name === name);
   if (v) { u.voice = v; u.lang = v.lang; }
@@ -596,7 +612,7 @@ function updatePlayer() {
   if (!S.book) return;
   const p = curPara();
   const pct = S.paras.length ? Math.floor((p + 1) * 100 / S.paras.length) : 0;
-  const parts = [S.playing ? 'Reading' : 'Paused'];
+  const parts = [S.playing ? (S.loadingVoice ? 'Loading voice…' : 'Reading') : 'Paused'];
   const ch = chapterTitle(p); if (ch) parts.push(ch);
   parts.push(pct + '%');
   if (S.sleepChapter) parts.push('sleep at chapter end');
@@ -626,6 +642,7 @@ function pause() {
   if (!S.playing) { updatePlayer(); return; }
   S.playing = false; S.token++;
   speechSynthesis.cancel();
+  stopAudio();
   keepAlive(false);
   savePos(true);
   updatePlayer();
@@ -635,6 +652,7 @@ function toggle() { S.playing ? pause() : play(); }
 function speakFrom(i) {
   const token = ++S.token;
   speechSynthesis.cancel();
+  stopAudio();
   S.segIdx = Math.max(0, Math.min(i, S.segs.length - 1));
   setTimeout(() => { if (token === S.token) speakNext(token); }, 60);
 }
@@ -649,39 +667,92 @@ function speakNext(token) {
     S.segIdx++;
   }
   if (!text) { finished(); return; }
+  const vid = currentVoiceName();
+  if (engineOf(vid) === 'browser') browserSpeak(token, text);
+  else audioSpeak(token, vid, text);
+}
+
+/** Called when a sentence finishes, whatever voice engine read it. */
+function segDone(token) {
+  if (token !== S.token) return;
+  const k = S.segIdx; const next = k + 1;
+  if (S.sleepChapter && next < S.segs.length && chapterIndex(S.segs[next][0]) !== chapterIndex(S.segs[k][0])) {
+    S.sleepChapter = false; S.segIdx = next; pause(); setSleep(0); return;
+  }
+  S.segIdx = next;
+  if (S.segIdx >= S.segs.length) { finished(); return; }
+  afterMove(); speakNext(token);
+}
+function speechFailed(token, message) {
+  S.speechErrors = (S.speechErrors || 0) + 1;
+  if (S.speechErrors >= 3) {
+    pause();
+    toast((message ? message + ' ' : 'This voice isn’t working. ') + 'Try another voice from the menu at the bottom right.', 9000);
+    return;
+  }
+  S.segIdx++; afterMove(); speakNext(token);
+}
+
+function browserSpeak(token, text) {
   const u = new SpeechSynthesisUtterance(text);
   const v = S.voices.find((x) => x.name === currentVoiceName());
   if (v) { u.voice = v; u.lang = v.lang; }
   u.rate = currentRate();
   u.onstart = () => { S.speechErrors = 0; };
-  u.onend = () => {
-    if (token !== S.token) return;
-    const k = S.segIdx; const next = k + 1;
-    if (S.sleepChapter && next < S.segs.length && chapterIndex(S.segs[next][0]) !== chapterIndex(S.segs[k][0])) {
-      S.sleepChapter = false; S.segIdx = next; pause(); setSleep(0); return;
-    }
-    S.segIdx = next;
-    if (S.segIdx >= S.segs.length) { finished(); return; }
-    afterMove(); speakNext(token);
-  };
+  u.onend = () => segDone(token);
   u.onerror = (ev) => {
     if (token !== S.token || ev.error === 'interrupted' || ev.error === 'canceled') return;
-    S.speechErrors = (S.speechErrors || 0) + 1;
-    if (S.speechErrors >= 3) {
-      pause();
-      toast('This voice isn’t working. Pick another voice from the menu at the bottom right' +
-        (S.info.edge ? ', or use “Open in Edge”.' : '.'), 8000);
-      return;
-    }
-    S.segIdx++; afterMove(); speakNext(token);
+    speechFailed(token);
   };
   S.utter = u; // keep a reference so the browser doesn't drop the callbacks
   afterMove();
   speechSynthesis.speak(u);
 }
+
+// Kokoro / Piper / cloud: generate audio for each sentence, a couple of sentences ahead.
+const AUD = { el: new Audio(), cache: new Map() };
+function segSpoken(i) { const [pi, a, b] = S.segs[i]; return spoken(S.paras[pi].slice(a, b)); }
+function audioFor(i, vid, rate, text) {
+  const key = `${i}|${vid}|${rate}`;
+  let p = AUD.cache.get(key);
+  if (!p) { p = genAudio(vid, text, rate); p.catch(() => {}); AUD.cache.set(key, p); }
+  return p;
+}
+async function audioSpeak(token, vid, text) {
+  const rate = currentRate(); const i = S.segIdx;
+  afterMove();
+  const p = audioFor(i, vid, rate, text);
+  let j = i + 1; let n = 0;
+  while (j < S.segs.length && n < 2) { const t = segSpoken(j); if (t) { audioFor(j, vid, rate, t); n++; } j++; }
+  for (const key of [...AUD.cache.keys()]) { const idx = +key.split('|')[0]; if (idx < i || idx > j) AUD.cache.delete(key); }
+  if (!engineReady(vid)) { S.loadingVoice = true; updatePlayer(); }
+  let r;
+  try { r = await p; } catch (e) {
+    S.loadingVoice = false; updatePlayer();
+    if (token !== S.token || e.message === 'dropped') return;
+    speechFailed(token, e.message.length < 160 ? e.message + '.' : '');
+    return;
+  }
+  S.loadingVoice = false;
+  if (token !== S.token) return;
+  S.speechErrors = 0;
+  const url = URL.createObjectURL(r.blob);
+  const a = AUD.el;
+  a.src = url; a.preservesPitch = true; a.playbackRate = Math.max(0.25, Math.min(4, r.extra || 1));
+  a.onended = () => { URL.revokeObjectURL(url); segDone(token); };
+  a.onerror = () => { URL.revokeObjectURL(url); if (token === S.token) speechFailed(token); };
+  updatePlayer();
+  a.play().catch((err) => { if (token === S.token) { pause(); toast('Couldn’t play audio: ' + err.message, 6000); } });
+}
+function stopAudio() {
+  AUD.el.onended = null; AUD.el.onerror = null; AUD.el.pause();
+  AUD.cache.clear();
+  flushEngines();
+  S.loadingVoice = false;
+}
 function afterMove() { highlight(); updatePlayer(); savePos(false); }
 async function finished() {
-  S.playing = false; S.token++; keepAlive(false);
+  S.playing = false; S.token++; keepAlive(false); stopAudio();
   S.segIdx = Math.max(0, S.segs.length - 1);
   savePos(true); updatePlayer();
   const cols = new Set(S.bookState.collections || []); cols.add('Finished'); cols.delete('Want to read');
@@ -805,6 +876,7 @@ function openSettings() {
     <div class="setrow"><label>Margins</label><select id="sMargin">${opt(['Narrow', 'Medium', 'Wide'], s.margin ?? 1)}</select></div>
     <div class="setrow"><label>Text size</label><input type="range" id="sSize" min="13" max="34" value="${s.textSize || 19}" style="flex:1"></div>
     <h3>Reading aloud</h3>
+    <div class="setrow"><button id="sVoices" class="primary">Voice options: natural &amp; premium voices…</button></div>
     <label class="check"><input type="checkbox" id="sClutter" ${s.skipClutter !== false ? 'checked' : ''}> Skip page numbers, footnote markers, links and scan notices</label>
     <p class="muted">Best voices: ${S.info.edge ? 'click <b>Better voices</b> at the top to open your library in Edge (Microsoft “Natural ★” voices) or Chrome (Google voices). ' : 'in Edge pick a voice marked “Natural ★”; in Chrome pick a “Google” voice. '}
       In this window, voices come from Windows (Settings → Time &amp; language → Speech → Add voices).</p>
@@ -833,6 +905,7 @@ function openSettings() {
     const f = (S.settings.fixes || []).slice(); f.splice(+b.dataset.fx, 1); await saveSettings({ fixes: f }); buildFixRules(); openSettings();
   }));
   $('#sRestore').onclick = () => $('#restoreInput').click();
+  $('#sVoices').onclick = () => openVoiceOptions();
   $('#sUpdate').onclick = checkUpdates;
 }
 $('#restoreInput').onchange = (e) => { const f = e.target.files[0]; e.target.value = ''; if (f) restoreBackup(f); };
@@ -868,6 +941,8 @@ $('#edgeBtn').onclick = (e) => {
     } catch (err) { toast(err.message, 6000); }
   };
   showMenu(r.left, r.bottom + 4, [
+    ['Natural & premium voices for this app…', () => openVoiceOptions()],
+    null,
     ['Open in Edge: Microsoft natural voices', () => open('edge')],
     ['Open in Chrome: Google voices', () => open('chrome')]
   ]);
@@ -882,19 +957,26 @@ $('#exportBtn').onclick = async () => {
   const nCh = Math.max(1, S.chapters.length);
   modal(`<h2>Export as MP3</h2>
     <p class="muted">Saves audio files (one per chapter) to a folder you choose, for any music player or phone.
-    Exports use the voices installed in Windows. Browsers don't allow recording the Edge or Google voices.</p>
+    (The Edge and Google browser voices can't be recorded, so they aren't listed here.)</p>
     <div class="setrow"><label>What</label><select id="xWhat">
       ${S.chapters.length ? `<option value="cur">This chapter: ${esc(S.chapters[Math.max(0, cur)].title)}</option>` : ''}
       <option value="all">Whole book (${nCh} file${nCh === 1 ? '' : 's'})</option></select></div>
-    <div class="setrow"><label>Voice</label><select id="xVoice">${voices.length
+    <div class="setrow"><label>Voice</label><select id="xVoice">
+      ${extraVoiceOptions().map(([label, items]) => `<optgroup label="${esc(label)}">${items.map(([v, l]) => `<option value="${esc(v)}" ${v === currentVoiceName() ? 'selected' : ''}>${esc(l)}</option>`).join('')}</optgroup>`).join('')}
+      <optgroup label="Windows voices">${voices.length
       ? voices.map((v) => `<option value="${esc(v.name)}">${esc(voiceLabel(v.name, v.lang, v.gender && v.gender !== 'NotSet' ? v.gender : ''))}</option>`).join('')
-      : '<option value="">Windows default voice</option>'}</select></div>
+      : '<option value="">Windows default voice</option>'}</optgroup></select></div>
+    <p class="muted">Natural voices (Kokoro, Piper) and premium voices make much better audiobooks. Premium voices are billed by your provider.</p>
     <div class="setrow"><label>Speed</label><select id="xRate">${RATES.map((r) => `<option value="${r}" ${r === currentRate() ? 'selected' : ''}>${r}×</option>`).join('')}</select></div>
     <p class="muted">More Windows voices: Settings → Time &amp; language → Speech → Add voices.</p>`,
   [['Cancel'], ['Choose folder & export', async () => {
     const what = $('#xWhat').value;
     const body = { bookId: S.book.id, voice: $('#xVoice').value || null, rate: +$('#xRate').value,
       from: what === 'cur' ? Math.max(0, cur) : 0, to: what === 'cur' ? Math.max(0, cur) : 9999 };
+    if (body.voice && engineOf(body.voice) !== 'browser') {
+      if (S.playing) pause();
+      return browserExport({ from: body.from, to: body.to, vid: body.voice, rate: body.rate });
+    }
     try {
       const r = await api('/api/export', { method: 'POST', json: body });
       if (r.started) watchExport();
@@ -928,10 +1010,13 @@ function watchExport() {
   buildFixRules();
   applyAppearance();
   // Only in the app window itself (not when already opened in Edge or Chrome)
-  $('#edgeBtn').hidden = !S.info.edge || !/Electron/.test(navigator.userAgent);
+  $('#edgeBtn').hidden = false;
+  if (!S.info.edge || !/Electron/.test(navigator.userAgent)) $('#edgeBtn').onclick = () => openVoiceOptions();
   $('#exportBtn').hidden = !S.info.export;
   loadVoices();
   await renderLibrary();
+  // Natural & premium voice lists (quietly, in the background)
+  Promise.all([piperCatalog().then(piperRefreshStored).catch(() => {}), cloudRefresh().catch(() => {})]).then(() => fillVoiceSelect());
   if (/Electron/.test(navigator.userAgent) && S.info.edge && !S.settings.seenTip) {
     saveSettings({ seenTip: true });
     toast('Tip: “Better voices” opens your library in Edge (Microsoft natural voices) or Chrome (Google voices).', 8000);

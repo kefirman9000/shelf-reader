@@ -9,9 +9,10 @@ const { Store } = require('./lib/store');
 const { SOURCES, resolveArchive, getBuffer, getJson, define } = require('./lib/sources');
 const { epubInfo } = require('./lib/extract');
 const exporter = require('./lib/export');
+const cloud = require('./lib/cloud');
 
 const UI_DIR = path.join(__dirname, 'ui');
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.png': 'image/png', '.svg': 'image/svg+xml' };
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.txt': 'text/plain; charset=utf-8', '.css': 'text/css; charset=utf-8', '.png': 'image/png', '.svg': 'image/svg+xml' };
 const REPO = 'kefirman9000/shelf-reader';
 
 function startServer(opts = {}) {
@@ -19,8 +20,10 @@ function startServer(opts = {}) {
   const version = opts.version || '1.0.0';
   let port = opts.port || 47321;
 
+  // Cross-origin isolation lets the natural-voice engine use several CPU threads.
+  const ISOLATE = { 'Cross-Origin-Opener-Policy': 'same-origin', 'Cross-Origin-Embedder-Policy': 'credentialless' };
   const send = (res, code, body, type = 'application/json; charset=utf-8') => {
-    res.writeHead(code, { 'Content-Type': type, 'Cache-Control': 'no-store' });
+    res.writeHead(code, { 'Content-Type': type, 'Cache-Control': 'no-store', ...ISOLATE });
     res.end(typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body));
   };
   const readBody = (req, limit = 600 * 1024 * 1024) => new Promise((resolve, reject) => {
@@ -96,6 +99,24 @@ function startServer(opts = {}) {
       try { if (job.child) job.child.kill(); } catch (_) {}
       return send(res, 200, { ok: true });
     }
+    if (p === '/api/export/begin' && req.method === 'POST') {
+      if (!opts.pickFolder) return send(res, 400, { error: 'Audio export works in the Windows app.' });
+      if (job.running) return send(res, 409, { error: 'An export is already running.' });
+      const r = await json(req);
+      const folder = await opts.pickFolder();
+      if (!folder) return send(res, 200, { cancelled: true });
+      const safe = (x) => String(x || 'Untitled').replace(/[\\/:*?"<>|\n\t]/g, '_').trim().slice(0, 80) || 'Untitled';
+      job.folder = path.join(folder, safe(r.title));
+      fs.mkdirSync(job.folder, { recursive: true });
+      return send(res, 200, { folder: job.folder });
+    }
+    if (p === '/api/export/file' && req.method === 'POST') {
+      if (!job.folder) return send(res, 400, { error: 'no export folder' });
+      const name = path.basename(decodeURIComponent(req.headers['x-filename'] || 'audio.mp3')).replace(/[\\/:*?"<>|]/g, '_');
+      if (!/\.mp3$/i.test(name)) return send(res, 400, { error: 'bad name' });
+      fs.writeFileSync(path.join(job.folder, name), await readBody(req, 500 * 1024 * 1024));
+      return send(res, 200, { ok: true });
+    }
     if (p === '/api/export/open' && req.method === 'POST') {
       if (job.folder && opts.openPath) opts.openPath(job.folder);
       return send(res, 200, { ok: true });
@@ -118,8 +139,36 @@ function startServer(opts = {}) {
       return send(res, 200, { started: true });
     }
     if (p === '/api/library') return send(res, 200, store.list().map(bookView));
-    if (p === '/api/settings' && req.method === 'GET') return send(res, 200, store.settings());
-    if (p === '/api/settings' && req.method === 'PUT') return send(res, 200, store.setSettings(await json(req)));
+    const pub = (st) => { const { cloud: _c, ...rest } = st; return { ...rest, cloud: cloud.publicView(st) }; };
+    if (p === '/api/settings' && req.method === 'GET') return send(res, 200, pub(store.settings()));
+    if (p === '/api/settings' && req.method === 'PUT') {
+      const patch = await json(req);
+      delete patch.cloud;
+      return send(res, 200, pub(store.setSettings(patch)));
+    }
+
+    // ---------- premium cloud voices (user's own API keys) ----------
+    if (p === '/api/cloud/config' && req.method === 'PUT') {
+      const r = await json(req); // { provider, key?, region?, model?, clear? }
+      if (!cloud.PROVIDERS[r.provider]) return send(res, 400, { error: 'unknown provider' });
+      const all = store.settings().cloud || {};
+      const cur = r.clear ? {} : { ...(all[r.provider] || {}) };
+      for (const k of ['key', 'region', 'model']) if (!r.clear && typeof r[k] === 'string' && r[k].trim()) cur[k] = r[k].trim();
+      store.setSettings({ cloud: { ...all, [r.provider]: cur } });
+      return send(res, 200, cloud.publicView(store.settings()));
+    }
+    if (p === '/api/cloud/voices') {
+      try { return send(res, 200, await cloud.voices(store.settings(), url.searchParams.get('provider'))); }
+      catch (e) { return send(res, 502, { error: e.message }); }
+    }
+    if (p === '/api/cloud/speak' && req.method === 'POST') {
+      const r = await json(req);
+      try {
+        const out = await cloud.speak(store.settings(), r.provider, r.voice, String(r.text || '').slice(0, 5000), +r.speed || 1);
+        res.writeHead(200, { 'Content-Type': 'audio/mpeg', 'X-Speed-Applied': out.applied ? '1' : '0', 'Cache-Control': 'no-store', ...ISOLATE });
+        return res.end(out.audio);
+      } catch (e) { return send(res, 502, { error: e.message }); }
+    }
 
     if (p === '/api/search') {
       const fn = SOURCES[url.searchParams.get('source')];
@@ -196,7 +245,7 @@ function startServer(opts = {}) {
     }
 
     if (p === '/api/backup') {
-      res.writeHead(200, { 'Content-Type': 'application/zip', 'Content-Disposition': `attachment; filename="ShelfReader-desktop-backup-${new Date().toISOString().slice(0, 10)}.zip"` });
+      res.writeHead(200, { ...ISOLATE, 'Content-Type': 'application/zip', 'Content-Disposition': `attachment; filename="ShelfReader-desktop-backup-${new Date().toISOString().slice(0, 10)}.zip"` });
       return res.end(store.backup());
     }
     if (p === '/api/restore' && req.method === 'POST') {

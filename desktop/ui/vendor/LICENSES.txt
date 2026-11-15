@@ -1,0 +1,10 @@
+Third-party code bundled with Shelf Reader's desktop app
+
+kokoro.web.js  — kokoro-js 1.2.1 (https://github.com/hexgrad/kokoro), Apache License 2.0.
+                 Includes Transformers.js (Apache 2.0) and a phonemizer built from eSpeak NG (GPL-3.0).
+                 The Kokoro-82M voice model is downloaded on first use from Hugging Face
+                 (onnx-community/Kokoro-82M-v1.0-ONNX), Apache License 2.0.
+lame.all.js    — lamejs 1.2.1 (https://github.com/zhuker/lamejs), LGPL-3.0.
+piper.web.js   — @mintplex-labs/piper-tts-web 1.0.5 (MIT), bundling onnxruntime-web 1.18.0 (MIT).
+                 Piper voices are downloaded on demand from Hugging Face; each voice has its own
+                 license listed in its MODEL_CARD.

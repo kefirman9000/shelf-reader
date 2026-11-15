@@ -45,9 +45,13 @@ An Android ebook reader that finds free, legal books and **reads them aloud** wi
 3. Windows may show *“Windows protected your PC”* because the app isn't code-signed. Click **More info → Run anyway**.
 
 The desktop app has the same library, cover shelf, search, reader, chapters, bookmarks and notes, collections, sleep timer, pronunciation fixes and themes. Extras on PC:
-- **Better voices:** opens your library in **Edge** (Microsoft's natural voices, marked ★) or **Chrome** (Google's voices). Keep the app running while you listen there.
+- **Voice options** (*Better voices ▾ → Natural & premium voices*, or *Settings*):
+  - **Kokoro natural voices** (free, recommended): open-source neural voices that run on your PC (Heart, Bella, Michael, Emma, George and more, with US and UK accents). One download of about 90 MB, then they work offline for listening **and** MP3 export.
+  - **Piper voices** (free): 100+ lighter voices in many languages, downloaded one at a time.
+  - **Premium cloud voices** with your own API key: **OpenAI**, **ElevenLabs**, **Microsoft Azure** and **Google Cloud** (Chirp 3 HD, Neural2, Studio). You pay the provider for what you use. Keys stay on your PC.
+- **Better voices ▾** can also open your library in **Edge** (Microsoft's natural voices) or **Chrome** (Google's voices). Keep the app running while you listen there.
 - **Readable voice names** like *Aria · English (US) · Female · Natural ★* or *Google · English (UK) · Male*. Choosing a voice plays a short preview.
-- **Export as MP3:** in a book, click **Export audio** to save a chapter or the whole book (one file per chapter) using Windows voices. Browsers don't allow recording the Edge or Google voices.
+- **Export as MP3:** in a book, click **Export audio** to save a chapter or the whole book (one file per chapter) with a Kokoro, Piper, premium or Windows voice. The Edge and Google browser voices can't be recorded.
 - **Bring your phone library over:** on the phone use *Menu → Back up library*, copy the `.zip` to your PC, and drop it on the app window (or *Settings → Restore from backup*). Books, places, notes and collections come across.
 - **Keyboard:** <kbd>Space</kbd> play/pause, <kbd>←</kbd>/<kbd>→</kbd> paragraph, <kbd>Shift</kbd>+<kbd>←</kbd>/<kbd>→</kbd> chapter, <kbd>B</kbd> bookmark, <kbd>C</kbd> chapters, <kbd>Ctrl</kbd>+<kbd>F</kbd> search. Media keys work too.
 - **Drag and drop** EPUB, PDF or TXT files onto the window to add them.
@@ -163,3 +167,5 @@ The app is plain Kotlin with the Android framework. Its only library is [pdfbox-
 | `Backup.kt` | Backup and restore, dictionary lookups |
 | `VoiceNames.kt` | Readable voice names |
 | `desktop/` | Windows app (Electron): `server.js` local library server, `ui/` screens, `lib/` extraction, sources, storage, MP3 export |
+| `desktop/ui/engines.js` | Kokoro, Piper and premium cloud voices; natural-voice MP3 export |
+| `desktop/lib/cloud.js` | OpenAI, ElevenLabs, Azure and Google Cloud voice connections |
