@@ -11,7 +11,8 @@ os.makedirs(out, exist_ok=True)
 
 
 def api(path, data=None, method=None, headers=None):
-    req = urllib.request.Request(BASE + path, data=data, method=method, headers=headers or {})
+    h = {"x-shelf": "1", **(headers or {})}  # the server only accepts changes with this header
+    req = urllib.request.Request(BASE + path, data=data, method=method, headers=h)
     with urllib.request.urlopen(req, timeout=120) as r:
         return json.loads(r.read() or b"null")
 
