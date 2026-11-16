@@ -24,7 +24,13 @@ object CrashReport {
     private fun busyFile(ctx: Context) = File(ctx.filesDir, "neural-busy")
 
     /** Natural voices use 1 thread and shorter pieces after they've crashed once. */
-    fun safeVoices(ctx: Context) = prefs(ctx).getBoolean("safeVoices", false)
+    fun safeVoices(ctx: Context): Boolean {
+        val p = prefs(ctx)
+        // Up to 1.0.35, any crash while a voice was working turned this on, including crashes that had
+        // nothing to do with the voice engine. Clear it once; a real voice crash turns it back on.
+        if (!p.getBoolean("safeVoicesReset1", false)) p.edit().putBoolean("safeVoicesReset1", true).putBoolean("safeVoices", false).apply()
+        return p.getBoolean("safeVoices", false)
+    }
 
     fun install(ctx: Context) {
         if (installed) return
@@ -35,6 +41,9 @@ object CrashReport {
             try {
                 val busy = try { busyFile(app).readText() } catch (_: Throwable) { "" }
                 crashFile(app).writeText("Thread: ${t.name}\n" + (if (busy.isNotBlank()) "Natural voice busy: $busy\n" else "") + e.stackTraceToString().take(12_000))
+                // This crash has its own stack trace, so it isn't the voice engine dying in native code.
+                // Clear the marker so the next launch doesn't blame the voice and slow it down.
+                busyFile(app).delete()
             } catch (_: Throwable) {}
             prev?.uncaughtException(t, e)
         }

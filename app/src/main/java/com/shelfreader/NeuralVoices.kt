@@ -258,23 +258,52 @@ class NeuralSpeaker(
         while (alive) {
             val c = try { ready.take() } catch (_: InterruptedException) { continue }
             if (c.epoch != epoch.get() || c.samples.isEmpty()) { if (c.epoch == epoch.get()) main.post { if (c.epoch == epoch.get()) { onStart(c.id); onDone(c.id) } }; continue }
-            val t = try { trackFor(c.rate) } catch (e: Throwable) { main.post { onError(c.id, "Couldn't open the speaker: ${e.message}") }; continue }
             main.post { if (c.epoch == epoch.get()) onStart(c.id) }
-            val start = t.playbackHeadPosition.toLong() and 0xffffffffL
-            var off = 0
-            while (off < c.samples.size && c.epoch == epoch.get()) {
-                val n = t.write(c.samples, off, minOf(4096, c.samples.size - off), AudioTrack.WRITE_BLOCKING)
-                if (n <= 0) break
-                off += n
+            // Android can invalidate an audio track at any time (audio server restart, output change, …).
+            // Then every call on it throws, so drop it, open a fresh one and try the sentence once more.
+            var err: Throwable? = null
+            for (attempt in 0..1) {
+                err = try { playClip(c); null } catch (_: InterruptedException) { null } catch (t: Throwable) { dropTrack(); t }
+                if (err == null || !alive || c.epoch != epoch.get()) break
             }
-            // wait until it has actually been heard
-            val endFrame = start + off
-            try { while (alive && c.epoch == epoch.get() && (t.playbackHeadPosition.toLong() and 0xffffffffL) < endFrame - c.rate / 50) Thread.sleep(15) } catch (_: InterruptedException) {}
-            if (c.epoch == epoch.get()) main.post { if (c.epoch == epoch.get()) onDone(c.id) }
+            val failure = err
+            if (c.epoch == epoch.get()) main.post {
+                if (c.epoch != epoch.get()) return@post
+                if (failure != null) onError(c.id, "The speaker stopped working: ${failure.message ?: failure.javaClass.simpleName}") else onDone(c.id)
+            }
         }
         // only this thread writes to the track, so only it releases it (releasing mid-write crashes)
-        synchronized(this) { try { track?.release() } catch (_: Throwable) {}; track = null }
+        dropTrack()
     }, "neural-player")
+
+    /** Plays one clip and returns once it has actually been heard (or was cut short by stop()). */
+    private fun playClip(c: Clip) {
+        val t = trackFor(c.rate)
+        val start = t.playbackHeadPosition.toLong() and 0xffffffffL
+        var off = 0
+        while (off < c.samples.size && c.epoch == epoch.get()) {
+            val n = t.write(c.samples, off, minOf(4096, c.samples.size - off), AudioTrack.WRITE_BLOCKING)
+            if (n < 0) throw IllegalStateException("audio write failed ($n)")
+            if (n == 0) break
+            off += n
+        }
+        // wait until it has been heard; give up if the sound stops moving (so a stuck track can't hang reading)
+        val endFrame = start + off - c.rate / 50
+        var last = -1L; var stuckSince = System.currentTimeMillis()
+        while (alive && c.epoch == epoch.get()) {
+            val pos = t.playbackHeadPosition.toLong() and 0xffffffffL
+            if (pos >= endFrame) break
+            val now = System.currentTimeMillis()
+            if (pos != last) { last = pos; stuckSince = now } else if (now - stuckSince > 3000) throw IllegalStateException("audio stopped playing")
+            Thread.sleep(15)
+        }
+    }
+
+    @Synchronized
+    private fun dropTrack() {
+        try { track?.release() } catch (_: Throwable) {}
+        track = null; trackRate = 0
+    }
 
     init { maker.start(); player.start() }
 
@@ -282,7 +311,8 @@ class NeuralSpeaker(
     private fun trackFor(rate: Int): AudioTrack {
         val cur = track
         if (cur != null && trackRate == rate) return cur
-        cur?.release()
+        try { cur?.release() } catch (_: Throwable) {}
+        track = null; trackRate = 0
         val min = AudioTrack.getMinBufferSize(rate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_FLOAT)
         val t = AudioTrack.Builder()
             .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
@@ -290,6 +320,7 @@ class NeuralSpeaker(
             .setTransferMode(AudioTrack.MODE_STREAM)
             .setBufferSizeInBytes(maxOf(min, rate * 4 / 4))
             .build()
+        if (t.state != AudioTrack.STATE_INITIALIZED) { try { t.release() } catch (_: Throwable) {}; throw IllegalStateException("couldn't open the speaker") }
         t.play()
         track = t; trackRate = rate
         return t
