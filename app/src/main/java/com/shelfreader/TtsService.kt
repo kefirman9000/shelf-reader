@@ -499,7 +499,9 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
         val rate = Settings.rateFor(this, bookId)
         val nv = neuralVoice()
         val ns = if (nv != null) neuralSpeaker().also { it.voice = nv } else null
-        while (queuedUpTo < segs.size - 1 && (queuedUpTo < segIndex + 4 || (first && !spoke))) {
+        // keep a few sentences queued ahead. Count only ones that are spoken: pieces that are skipped (a bare "2." in a
+        // numbered list, page numbers) used to use up the look-ahead, and after four in a row reading just stopped.
+        while (queuedUpTo < segs.size - 1 && (lastSpoken < segIndex + 4 || (first && !spoke))) {
             val k = ++queuedUpTo
             val (items, lastK) = itemsFor(k, sp, natural) ?: continue
             queuedUpTo = lastK
