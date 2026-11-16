@@ -114,6 +114,7 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        intent?.getStringExtra("selftest_voice")?.let { SelfTest.run(applicationContext, it) }
 
         window.statusBarColor = UiColors.SURFACE
         window.navigationBarColor = UiColors.SURFACE
