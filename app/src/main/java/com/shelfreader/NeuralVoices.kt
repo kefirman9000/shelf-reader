@@ -328,7 +328,9 @@ class NeuralSpeaker(
             .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
             .setAudioFormat(AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_FLOAT).setSampleRate(rate).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build())
             .setTransferMode(AudioTrack.MODE_STREAM)
-            .setBufferSizeInBytes(maxOf(min, rate * 4 / 4))
+            // about a quarter second, in whole 4-byte float samples: Android rejects any other size, and at
+            // Piper's 22,050 Hz a plain quarter second (22,050 bytes) isn't one, so every Piper sentence failed
+            .setBufferSizeInBytes((maxOf(min, rate) + 3) / 4 * 4)
             .build()
         if (t.state != AudioTrack.STATE_INITIALIZED) { try { t.release() } catch (_: Throwable) {}; throw IllegalStateException("couldn't open the speaker") }
         t.play()
