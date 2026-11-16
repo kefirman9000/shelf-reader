@@ -6,7 +6,9 @@ import android.util.Log
 /** Runs a natural-voice check (used by the "Voice test" workflow on an emulator; not reachable from the app's UI). */
 object SelfTest {
     private const val TAG = "ShelfSelfTest"
+    private val started = java.util.concurrent.atomic.AtomicBoolean(false)
     fun run(ctx: Context, modelId: String) {
+        if (!started.compareAndSet(false, true)) return   // the screen can be created twice; run the test once
         Thread {
             try {
                 val m = NeuralVoices.MODELS.first { it.id == modelId }
@@ -26,14 +28,23 @@ object SelfTest {
                     Log.i(TAG, "edge '${s.take(20)}' (${s.length} chars) -> ${g?.first?.size} samples")
                 }
                 val done = Object()
-                val sp = NeuralSpeaker(ctx, { Log.i(TAG, "start $it") }, { Log.i(TAG, "done $it"); if (it == "b") synchronized(done) { (done as Object).notifyAll() } }, { id, msg -> Log.e(TAG, "error $id $msg") })
+                var errors = 0
+                val sp = NeuralSpeaker(ctx, { Log.i(TAG, "start $it") }, { Log.i(TAG, "done $it"); if (it == "b") synchronized(done) { (done as Object).notifyAll() } }, { id, msg -> errors++; Log.e(TAG, "error $id $msg") })
                 sp.voice = NeuralVoices.key(m, m.voices[0].first)
-                sp.speak("First sentence from the player.", true, "a", 1f)
-                sp.silence(300, "p")
-                sp.speak("And a second one.", false, "b", 1.1f)
-                synchronized(done) { (done as Object).wait(60_000) }
+                // like reading a book: a pause first, then sentences with pauses between them
+                sp.silence(200, "p0")
+                val lines = listOf("First sentence from the player.", "It was a bright, cold morning.", "Somewhere a gull called twice.",
+                    "Then the harbor went quiet again.", "And a second one.")
+                for ((k, line) in lines.withIndex()) {
+                    sp.speak(line, false, if (k == lines.size - 1) "b" else "s$k", 1f + k * 0.05f)
+                    if (k < lines.size - 1) sp.silence(250L + k * 100, "p${k + 1}")
+                }
+                synchronized(done) { (done as Object).wait(120_000) }
+                Log.i(TAG, "speaker opened ${sp.tracksOpened} time(s)")
                 sp.shutdown()
-                Log.i(TAG, "SELFTEST DONE OK")
+                if (errors > 0) Log.e(TAG, "SELFTEST FAILED: $errors error(s) while playing")
+                else if (sp.tracksOpened > 1) Log.e(TAG, "SELFTEST FAILED: the speaker was reopened ${sp.tracksOpened} times")
+                else Log.i(TAG, "SELFTEST DONE OK")
             } catch (t: Throwable) {
                 Log.e(TAG, "SELFTEST FAILED", t)
             }

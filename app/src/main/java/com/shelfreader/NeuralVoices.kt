@@ -222,7 +222,8 @@ class NeuralSpeaker(
     private val onError: (String, String) -> Unit
 ) {
     private class Item(val id: String, val text: String?, val silenceMs: Long, val speed: Float, val epoch: Int)
-    private class Clip(val id: String, val samples: FloatArray, val rate: Int, val epoch: Int)
+    /** Speech, or a pause ([silenceMs] > 0, made at whatever rate the speaker is already playing). */
+    private class Clip(val id: String, val samples: FloatArray, val rate: Int, val epoch: Int, val silenceMs: Long = 0)
 
     private val main = Handler(Looper.getMainLooper())
     private val epoch = AtomicInteger(0)
@@ -232,6 +233,8 @@ class NeuralSpeaker(
     @Volatile private var alive = true
     private var track: AudioTrack? = null
     private var trackRate = 0
+    /** How many times the speaker was opened (the voice test checks it stays at one per voice). */
+    @Volatile var tracksOpened = 0; private set
 
     private val maker = Thread({
         while (alive) {
@@ -239,7 +242,9 @@ class NeuralSpeaker(
             if (it.epoch != epoch.get()) continue
             try {
                 val clip = if (it.text == null) {
-                    Clip(it.id, FloatArray((trackRate.takeIf { r -> r > 0 } ?: 24000) * it.silenceMs.toInt() / 1000), trackRate.takeIf { r -> r > 0 } ?: 24000, it.epoch)
+                    // a pause: made by the player at the voice's own rate. (Made here at a fixed 24 kHz, every pause
+                    // in a 22 kHz Piper voice closed and reopened the speaker, which broke Piper voices.)
+                    Clip(it.id, FloatArray(0), 0, it.epoch, silenceMs = it.silenceMs.coerceAtLeast(1))
                 } else {
                     val v = voice ?: throw Exception("No voice")
                     val (m, sid) = NeuralVoices.parse(v) ?: throw Exception("Unknown voice")
@@ -257,7 +262,7 @@ class NeuralSpeaker(
     private val player = Thread({
         while (alive) {
             val c = try { ready.take() } catch (_: InterruptedException) { continue }
-            if (c.epoch != epoch.get() || c.samples.isEmpty()) { if (c.epoch == epoch.get()) main.post { if (c.epoch == epoch.get()) { onStart(c.id); onDone(c.id) } }; continue }
+            if (c.epoch != epoch.get() || (c.samples.isEmpty() && c.silenceMs <= 0)) { if (c.epoch == epoch.get()) main.post { if (c.epoch == epoch.get()) { onStart(c.id); onDone(c.id) } }; continue }
             main.post { if (c.epoch == epoch.get()) onStart(c.id) }
             // Android can invalidate an audio track at any time (audio server restart, output change, …).
             // Then every call on it throws, so drop it, open a fresh one and try the sentence once more.
@@ -278,17 +283,22 @@ class NeuralSpeaker(
 
     /** Plays one clip and returns once it has actually been heard (or was cut short by stop()). */
     private fun playClip(c: Clip) {
-        val t = trackFor(c.rate)
+        val open = synchronized(this) { trackRate }
+        // a pause before anything has played: just wait, rather than open the speaker at a rate the voice may not use
+        if (c.silenceMs > 0 && open == 0) { Thread.sleep(c.silenceMs); return }
+        val rate = if (c.silenceMs > 0) open else c.rate
+        val samples = if (c.silenceMs > 0) FloatArray((rate * c.silenceMs / 1000).toInt()) else c.samples
+        val t = trackFor(rate)
         val start = t.playbackHeadPosition.toLong() and 0xffffffffL
         var off = 0
-        while (off < c.samples.size && c.epoch == epoch.get()) {
-            val n = t.write(c.samples, off, minOf(4096, c.samples.size - off), AudioTrack.WRITE_BLOCKING)
+        while (off < samples.size && c.epoch == epoch.get()) {
+            val n = t.write(samples, off, minOf(4096, samples.size - off), AudioTrack.WRITE_BLOCKING)
             if (n < 0) throw IllegalStateException("audio write failed ($n)")
             if (n == 0) break
             off += n
         }
         // wait until it has been heard; give up if the sound stops moving (so a stuck track can't hang reading)
-        val endFrame = start + off - c.rate / 50
+        val endFrame = start + off - rate / 50
         var last = -1L; var stuckSince = System.currentTimeMillis()
         while (alive && c.epoch == epoch.get()) {
             val pos = t.playbackHeadPosition.toLong() and 0xffffffffL
@@ -322,7 +332,7 @@ class NeuralSpeaker(
             .build()
         if (t.state != AudioTrack.STATE_INITIALIZED) { try { t.release() } catch (_: Throwable) {}; throw IllegalStateException("couldn't open the speaker") }
         t.play()
-        track = t; trackRate = rate
+        track = t; trackRate = rate; tracksOpened++
         return t
     }
 
