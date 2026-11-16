@@ -475,6 +475,7 @@ class MainActivity : Activity() {
         add(settingRow("🔤", "Pronunciations", "Fix names or words the voice says wrong") { editPronunciations { svc() } })
         add(settingRow("⏸", "Natural pauses", "Pause by punctuation, longer between paragraphs, chapter headings announced", Settings.naturalPauses(this)) { Settings.setNaturalPauses(this, it?.isChecked == true); svc() })
         add(settingRow("🔢", "Say numbers properly", "“Chapter XII” → “Chapter Twelve”, Henry VIII, 1850s, $4.50, Dr., St.", Settings.speakNumbers(this)) { Settings.setSpeakNumbers(this, it?.isChecked == true); svc() })
+        add(settingRow("🧵", "Fix broken lines", "Join sentences a book split across lines (common in scanned books and PDFs) before reading them aloud", Settings.fixBrokenLines(this)) { Settings.setFixBrokenLines(this, it?.isChecked == true); svc() })
         add(settingRow("✂", "Skip page numbers & clutter", "Page numbers, running headers, footnote markers, links", Settings.skipClutter(this)) { Settings.setSkipClutter(this, it?.isChecked == true); svc() })
         add(settingRow("🎧", "Resume with headphones", "Continue a paused book when headphones connect", Settings.resumeOnHeadphones(this)) { Settings.setResumeOnHeadphones(this, it?.isChecked == true) })
         add(settingRow("⚙", "Android text-to-speech settings", "Speech engine, language packs and default rate") { openTtsSettingsScreen() })

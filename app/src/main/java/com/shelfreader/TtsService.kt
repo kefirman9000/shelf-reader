@@ -484,33 +484,56 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
         val rate = Settings.rateFor(this, bookId)
         while (queuedUpTo < segs.size - 1 && (queuedUpTo < segIndex + 4 || (first && !spoke))) {
             val k = ++queuedUpTo
-            val items = itemsFor(k, sp, natural) ?: continue
+            val (items, lastK) = itemsFor(k, sp, natural) ?: continue
+            queuedUpTo = lastK
             if (natural) t.setSpeechRate(rate * SpeechText.paceFor(segs[k].para))
             for ((j, it) in items.withIndex()) {
                 val last = j == items.size - 1
-                t.speak(it.text, mode, null, if (last) "$gen:$k:e" else "$gen:$k:$j")
+                t.speak(it.text, mode, null, if (last) "$gen:$lastK:e" else "$gen:$k:$j")
                 mode = TextToSpeech.QUEUE_ADD
-                val gap = if (natural) gapAfter(k, it.gapMs, last) else 0
-                if (gap > 30) t.playSilentUtterance(gap.toLong(), TextToSpeech.QUEUE_ADD, "$gen:$k:p$j")
+                val gap = if (natural) gapAfter(lastK, it.gapMs, last) else 0
+                if (gap > 30) t.playSilentUtterance(gap.toLong(), TextToSpeech.QUEUE_ADD, "$gen:$lastK:p$j")
             }
             spoke = true
-            lastSpoken = k
+            lastSpoken = lastK
         }
         if (natural) t.setSpeechRate(rate)
         if (first && !spoke) finished()
     }
 
     /** What to say for sentence [k]: chapter headings announced like an audiobook, clause pieces with pauses. */
-    private fun itemsFor(k: Int, sp: Speaker, natural: Boolean): List<SpeechText.Piece>? {
+    private fun clutter(pi: Int): Boolean {
+        val p = paras[pi]
+        return Settings.skipClutter(this) && (pi in mergedSubs || SpeechText.isHeader(headers, p) || SpeechText.isPageNumber(p))
+    }
+
+    /** What to say for sentence [k] (and the index of the last sentence used): chapter headings announced like an
+     *  audiobook, lines broken mid-sentence joined back together, clause pieces with pauses. */
+    private fun itemsFor(k: Int, sp: Speaker, natural: Boolean): Pair<List<SpeechText.Piece>, Int>? {
         val s = segs[k]
         val p = paras[s.para]
-        if (Settings.skipClutter(this) && (s.para in mergedSubs || SpeechText.isHeader(headers, p) || SpeechText.isPageNumber(p))) return null
+        if (clutter(s.para)) return null
         val ci = chapterIndexOf(s.para)
         if (natural && ci >= 0 && chapters[ci].para == s.para && SpeechText.isHeadingOf(p, chapters[ci].title)) {
-            return if (s.start == 0) SpeechText.chapterOpening(chapters[ci].title) else null
+            return if (s.start == 0) SpeechText.chapterOpening(chapters[ci].title) to k else null
         }
-        val text = sp.spoken(segText(k)) ?: return null
-        return if (natural) SpeechText.pieces(text) else listOf(SpeechText.Piece(text, 0))
+        var text = sp.spoken(segText(k)) ?: return null
+        // the sentence runs on into the next line(s): read it as one
+        var last = k
+        val fixLines = Settings.fixBrokenLines(this)
+        while (fixLines) {
+            val cur = segs[last]
+            if (cur.end < paras[cur.para].trimEnd().length) break
+            var j = last + 1
+            while (j < segs.size && segs[j].para != cur.para && clutter(segs[j].para)) j++
+            if (j >= segs.size || segs[j].start != 0 || segs[j].para == cur.para) break
+            if (!SpeechText.continues(paras[cur.para], paras[segs[j].para])) break
+            val more = sp.spoken(segText(j)) ?: break
+            text = SpeechText.joinText(text, more)
+            last = j
+            if (text.length > 1500) break
+        }
+        return (if (natural) SpeechText.pieces(text) else listOf(SpeechText.Piece(text, 0))) to last
     }
 
     /** Pause after a piece: by punctuation, plus more at paragraph and chapter ends; shorter at higher speeds. */

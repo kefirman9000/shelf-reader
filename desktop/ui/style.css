@@ -237,3 +237,7 @@ a.fn { color: var(--accent); cursor: pointer; text-decoration: none; font-size: 
 #abMore h3 { margin: 16px 0 8px; font-size: 15px; }
 .ditem.part { font-weight: 700; text-transform: none; letter-spacing: .02em; }
 #toast .link { background: none; border: none; color: var(--accent2, #56b394); font-weight: 600; cursor: pointer; padding: 0 0 0 8px; }
+
+/* lines a book broke mid-sentence flow on as one paragraph */
+p.cont { margin-top: -0.55em !important; text-indent: 0 !important; }
+#pages p.cont { margin-top: 0 !important; }

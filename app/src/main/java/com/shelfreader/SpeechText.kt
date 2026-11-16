@@ -304,6 +304,24 @@ object SpeechText {
         return out
     }
 
+    // ---------- lines broken in the middle of a sentence ----------
+    private val ENDS_SENTENCE = Regex("[.!?…:;\"”’»)\\]]\\s*$")
+    /** Does paragraph [next] carry on the sentence of [prev]? (Books made from scans often break every line.) */
+    fun continues(prev: String, next: String): Boolean {
+        val a = prev.trimEnd(); val b = next.trimStart()
+        if (a.isEmpty() || b.isEmpty()) return false
+        if (ENDS_SENTENCE.containsMatchIn(a)) return false
+        if (HEAD_RE.matches(a) || HEAD_RE.matches(b)) return false
+        if (a.length < 60 && a == a.uppercase() && a.any { it.isLetter() }) return false
+        val c = b[0]
+        return c.isLowerCase() || (c.isLetterOrDigit() && Regex("[,—–-]$").containsMatchIn(a))
+    }
+    /** Joins two pieces of one sentence, mending words split with a hyphen at the line end. */
+    fun joinText(a: String, b: String): String {
+        val x = a.trimEnd(); val y = b.trimStart()
+        return if (Regex("\\p{Ll}-$").containsMatchIn(x) && y.firstOrNull()?.isLowerCase() == true) x.dropLast(1) + y else "$x $y"
+    }
+
     /** A tiny steady change of pace per paragraph (±2%). */
     fun paceFor(para: Int): Float = 1f + (((para * 7919) % 41) - 20) / 1000f
 }

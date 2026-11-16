@@ -362,6 +362,7 @@ async function loadBook(id) {
     if (nx && nx.length < 70 && SpeechText.isHeadingOf(S.paras[c.para], c.title) && c.title.toLowerCase().endsWith(nx.toLowerCase().replace(/[.:]$/, ''))) S.skipParas.add(c.para + 1);
   }
   S.history = []; S.mediaCh = null;
+  computeCont();
   S.prevOpened = d.prevOpened || 0;
   indexPictures(d.images);
   S.segs = segments(S.paras);
@@ -410,7 +411,7 @@ function renderReader() {
     const chapStarts = new Set(S.chapters.map((c) => c.para));
     const marks = noteMarks();
     $('#text').innerHTML = S.paras.map((p, i) =>
-      `${picturesHTML(i)}<p data-i="${i}"${chapStarts.has(i) ? ' class="chap"' : ''}><button class="go" title="Read from here">▶</button>${marks[i] || ''}<span class="tx">${paraHTML(i)}</span></p>`).join('');
+      `${picturesHTML(i)}<p data-i="${i}"${chapStarts.has(i) ? ' class="chap"' : S.cont && S.cont[i] ? ' class="cont"' : ''}><button class="go" title="Read from here">▶</button>${marks[i] || ''}<span class="tx">${paraHTML(i)}</span></p>`).join('');
     S.renderedFor = S.book.id; S.hlPara = -1;
   }
   highlight(true);
@@ -748,6 +749,12 @@ function speakNext(token) {
   else audioSpeak(token, vid, items.map((x) => x.t).join(' '));
 }
 const natural = () => S.settings.naturalPauses !== false;
+/** S.cont[i]: paragraph i is the rest of a sentence the book broke off at the end of paragraph i-1. */
+function computeCont() {
+  const on = S.settings.fixBrokenLines !== false;
+  S.cont = S.paras.map((p, i) => on && i > 0 && SpeechText.continues(S.paras[i - 1], p));
+}
+const isClutterPara = (pi) => S.settings.skipClutter !== false && (S.skipParas?.has(pi) || S.headers?.has(S.paras[pi]) || SpeechText.isPageNumber(S.paras[pi]));
 /** What to say for a sentence, split into pieces with the pause after each (see speechtext.js). */
 function segItems(i) {
   const [pi, a, b] = S.segs[i];
@@ -756,8 +763,26 @@ function segItems(i) {
     // a chapter heading is announced like an audiobook: "Chapter Twelve." … "The Storm." …
     return a === 0 ? SpeechText.chapterOpening(ch.title) : null;
   }
-  const t = spoken(S.paras[pi].slice(a, b), pi);
+  let t = spoken(S.paras[pi].slice(a, b), pi);
   if (!t) return null;
+  // a sentence the book broke across lines is read as one
+  S.segLastFor = S.segLastFor || {};
+  let last = i;
+  if (S.settings.fixBrokenLines !== false) {
+    for (;;) {
+      const cur = S.segs[last];
+      if (cur[2] < S.paras[cur[0]].trimEnd().length) break;
+      let j = last + 1;
+      while (j < S.segs.length && S.segs[j][0] !== cur[0] && isClutterPara(S.segs[j][0])) j++;
+      if (j >= S.segs.length || S.segs[j][1] !== 0 || S.segs[j][0] === cur[0]) break;
+      if (!SpeechText.continues(S.paras[cur[0]], S.paras[S.segs[j][0]])) break;
+      const more = spoken(S.paras[S.segs[j][0]].slice(S.segs[j][1], S.segs[j][2]), S.segs[j][0]);
+      if (!more) break;
+      t = SpeechText.joinText(t, more); last = j;
+      if (t.length > 1500) break;
+    }
+  }
+  S.segLastFor[i] = last;
   if (!natural()) return [{ t, gap: 0 }];
   return engineOf(currentVoiceName()) === 'browser' ? SpeechText.pieces(t) : [{ t, gap: SpeechText.endPause(t) }];
 }
@@ -766,6 +791,7 @@ function gapAfter(k) {
   if (!natural()) return 0;
   const it = S.items || [];
   let g = it.length ? it[it.length - 1].gap : 280;
+  k = (S.segLastFor || {})[k] ?? k;
   const seg = S.segs[k], nx = S.segs[k + 1];
   if (seg && nx && nx[0] !== seg[0]) g += 260;
   if (seg && nx && chapterIndex(nx[0]) !== chapterIndex(seg[0])) g += 900;
@@ -783,7 +809,7 @@ function segDone(token) {
 }
 function segAdvance(token) {
   if (token !== S.token || !S.playing) return;
-  const k = S.segIdx; const next = k + 1;
+  const k = S.segIdx; const next = ((S.segLastFor || {})[k] ?? k) + 1;
   if (S.sleepChapter && next < S.segs.length && chapterIndex(S.segs[next][0]) !== chapterIndex(S.segs[k][0])) {
     S.sleepChapter = false; S.segIdx = next; pause(); setSleep(0); return;
   }
@@ -1206,6 +1232,7 @@ function openSettings() {
     <h3>Reading aloud</h3>
     <div class="setrow"><button id="sVoices" class="primary">Voice options: natural &amp; premium voices…</button></div>
     <label class="check"><input type="checkbox" id="sClutter" ${s.skipClutter !== false ? 'checked' : ''}> Skip page numbers, running headers, footnote markers, links and scan notices</label>
+    <label class="check"><input type="checkbox" id="sFixLines" ${s.fixBrokenLines !== false ? 'checked' : ''}> Fix broken lines: join sentences a book split across lines (scanned books and PDFs) before reading them aloud</label>
     <label class="check"><input type="checkbox" id="sNatural" ${s.naturalPauses !== false ? 'checked' : ''}> Natural pauses: by punctuation, longer between paragraphs and chapters, and chapter headings announced like an audiobook</label>
     <label class="check"><input type="checkbox" id="sNumbers" ${s.speakNumbers !== false ? 'checked' : ''}> Say numbers properly: “Chapter XII” → “Chapter Twelve”, Henry VIII, 1850s, $4.50, 3:30 pm, Dr. and St.</label>
     <p class="muted">Best voices: ${S.info.edge ? 'click <b>Better voices</b> at the top to open your library in Edge (Microsoft “Natural ★” voices) or Chrome (Google voices). ' : 'in Edge pick a voice marked “Natural ★”; in Chrome pick a “Google” voice. '}
@@ -1233,6 +1260,7 @@ function openSettings() {
   $('#sSize').oninput = (e) => { $('#text').style.fontSize = e.target.value + 'px'; };
   $('#sSize').onchange = (e) => saveSettings({ textSize: +e.target.value });
   $('#sClutter').onchange = (e) => saveSettings({ skipClutter: e.target.checked }).then(() => { if (S.playing) speakFrom(S.segIdx); });
+  $('#sFixLines').onchange = (e) => saveSettings({ fixBrokenLines: e.target.checked }).then(() => { computeCont(); if (S.view === 'reader') renderReader(); if (S.playing) speakFrom(S.segIdx); });
   $('#sNatural').onchange = (e) => saveSettings({ naturalPauses: e.target.checked }).then(() => { if (S.playing) speakFrom(S.segIdx); });
   $('#sNumbers').onchange = (e) => saveSettings({ speakNumbers: e.target.checked }).then(() => { if (S.playing) speakFrom(S.segIdx); });
   $('#fxAdd').onclick = async () => {

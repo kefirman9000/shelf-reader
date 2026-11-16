@@ -294,6 +294,9 @@ object Settings {
     fun setMargin(ctx: Context, v: Int) = p(ctx).edit().putInt("margin", v).apply()
 
     fun skipClutter(ctx: Context) = p(ctx).getBoolean("skipClutter", true)
+    /** Join lines that a scanned or converted book broke in the middle of a sentence. */
+    fun fixBrokenLines(ctx: Context) = p(ctx).getBoolean("fixBrokenLines", true)
+    fun setFixBrokenLines(ctx: Context, v: Boolean) = p(ctx).edit().putBoolean("fixBrokenLines", v).apply()
     fun naturalPauses(ctx: Context) = p(ctx).getBoolean("naturalPauses", true)
     fun setNaturalPauses(ctx: Context, v: Boolean) = p(ctx).edit().putBoolean("naturalPauses", v).apply()
     fun speakNumbers(ctx: Context) = p(ctx).getBoolean("speakNumbers", true)

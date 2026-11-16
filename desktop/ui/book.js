@@ -36,7 +36,7 @@ function bkRenderSection(si, opts = {}) {
       <div class="toc"><h2>Contents</h2>${toc.map((c) => `<div class="toc-item" data-p="${c.para}">${esc(c.title)}</div>`).join('')}</div>`;
   }
   for (let i = sec.start; i < sec.end; i++) {
-    html += `${picturesHTML(i)}<p data-i="${i}"${chapStarts.has(i) ? ' class="chap"' : ''}>${marks[i] || ''}<span class="tx">${paraHTML(i)}</span></p>`;
+    html += `${picturesHTML(i)}<p data-i="${i}"${chapStarts.has(i) ? ' class="chap"' : S.cont && S.cont[i] ? ' class="cont"' : ''}>${marks[i] || ''}<span class="tx">${paraHTML(i)}</span></p>`;
   }
   const pg = $('#pages');
   pg.innerHTML = html;

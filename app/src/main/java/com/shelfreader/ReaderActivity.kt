@@ -49,6 +49,8 @@ class ReaderActivity : Activity(), BookPageView.Host {
     private var paras: List<String> = emptyList()
     private var chapters: List<Chapter> = emptyList()
     private var pics: Map<Int, List<String>> = emptyMap()
+    /** cont[i]: paragraph i is the rest of a sentence broken off at the end of paragraph i-1 */
+    private var cont = BooleanArray(0)
     private var notes: List<Note> = emptyList()
     private var marks: Map<Int, String> = emptyMap()
 
@@ -105,7 +107,8 @@ class ReaderActivity : Activity(), BookPageView.Host {
         override fun getView(position: Int, convertView: View?, parent: ViewGroup?): View {
             val tv = (convertView as? TextView) ?: TextView(this@ReaderActivity).apply { setLineSpacing(0f, 1.3f) }
             val m = dp(margin)
-            tv.setPadding(m, dp(7), m, dp(7))
+            // lines broken mid-sentence sit close together, like one paragraph
+            tv.setPadding(m, if (cont.getOrElse(position) { false }) 0 else dp(7), m, if (cont.getOrElse(position + 1) { false }) 0 else dp(7))
             tv.textSize = textSize
             tv.typeface = font
             tv.setTextColor(theme.fg)
@@ -224,7 +227,7 @@ class ReaderActivity : Activity(), BookPageView.Host {
             }
             override fun onScroll(view: AbsListView?, first: Int, visible: Int, total: Int) {}
         })
-        bookView = BookPageView(this).apply { host = this@ReaderActivity }
+        bookView = BookPageView(this).apply { host = this@ReaderActivity; continues = { i -> cont.getOrElse(i) { false } } }
 
         // the player: book progress, big controls, quick settings
         controls = LinearLayout(this).apply {
@@ -271,7 +274,7 @@ class ReaderActivity : Activity(), BookPageView.Host {
         val cg = { LinearLayout.LayoutParams(WRAP, WRAP).apply { rightMargin = dp(8) } }
         chips.addView(speedBtn, cg())
         chips.addView(chip("🗣 Voice") { pickVoice() }, cg())
-        chips.addView(chip("⏾ Sleep") { sleepMenu() }, cg())
+        chips.addView(chip("🌙 Sleep") { sleepMenu() }, cg())
         chips.addView(layoutChip, cg())
         chips.addView(chip("🔖 Notes") { showNotes() }, cg())
         chips.addView(chip("🔎 Find") { searchInBook() }, cg())
@@ -300,6 +303,7 @@ class ReaderActivity : Activity(), BookPageView.Host {
                 runOnUiThread {
                     paras = d.paras
                     chapters = d.chapters
+                    cont = BooleanArray(d.paras.size) { i -> i > 0 && Settings.fixBrokenLines(this) && SpeechText.continues(d.paras[i - 1], d.paras[i]) }
                     pics = pm
                     sections = buildSections()
                     loaded = true
@@ -1374,10 +1378,17 @@ class ReaderActivity : Activity(), BookPageView.Host {
             SheetRow("🔖", "Bookmarks, notes & highlights") { action(2) },
             null,
             SheetRow("🗣", "Voice", "Choose the voice for this book") { action(4) },
-            SheetRow("⏾", "Sleep timer", "Stop after a time or at the end of the chapter") { action(3) },
+            SheetRow("🌙", "Sleep timer", "Stop after a time or at the end of the chapter") { action(3) },
             SheetRow("⏸", "Natural pauses & chapter announcements", null, Settings.naturalPauses(this)) { action(19) },
             SheetRow("🔢", "Say numbers properly", "Chapter XII → Twelve, 1850s, \$4.50", Settings.speakNumbers(this)) { action(20) },
             SheetRow("✂", "Skip page numbers & clutter", null, Settings.skipClutter(this)) { action(7) },
+            SheetRow("🧵", "Fix broken lines", "Join sentences a book split across lines, before reading", Settings.fixBrokenLines(this)) {
+                Settings.setFixBrokenLines(this, !Settings.fixBrokenLines(this))
+                cont = BooleanArray(paras.size) { i -> i > 0 && Settings.fixBrokenLines(this) && SpeechText.continues(paras[i - 1], paras[i]) }
+                TtsService.instance?.applySettings(true)
+                curSection = -1; if (bookMode) showPara(curPara, 0) else adapter.notifyDataSetChanged()
+                toast(if (Settings.fixBrokenLines(this)) "Broken lines are joined into whole sentences" else "Lines are read as they are in the book")
+            },
             SheetRow("🔤", "Pronunciations", "Fix words the voice says wrong") { action(6) },
             null,
             SheetRow("🎵", "Save as audio files…", "MP3-style audio of the book or a chapter") { action(8) },

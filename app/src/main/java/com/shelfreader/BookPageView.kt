@@ -104,6 +104,9 @@ class BookPageView(ctx: Context) : View(ctx) {
         cameraDistance = 9000 * dp
     }
 
+    /** Is paragraph i the rest of a sentence broken off in paragraph i-1? */
+    var continues: (Int) -> Boolean = { false }
+
     fun setContent(
         section: Section, paras: List<String>, chapters: List<Chapter>, pics: (Int) -> List<Bitmap>,
         highlights: List<Mark>, coverBmp: Bitmap?, title: String, author: String
@@ -160,7 +163,7 @@ class BookPageView(ctx: Context) : View(ctx) {
                 sb.setSpan(StyleSpan(Typeface.BOLD), st, en, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
                 sb.setSpan(RelativeSizeSpan(1.35f), st, en, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
                 sb.setSpan(AlignmentSpan.Standard(Layout.Alignment.ALIGN_CENTER), st, en, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-            } else if (i != s.start && (i - 1) !in chapterStarts) {
+            } else if (i != s.start && (i - 1) !in chapterStarts && !continues(i)) {
                 sb.setSpan(LeadingMarginSpan.Standard(indent, 0), st, en, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
             }
             for (m in marks) if (m.para == i) {
@@ -171,7 +174,8 @@ class BookPageView(ctx: Context) : View(ctx) {
                 sb.setSpan(ForegroundColorSpan(accent), st + f.range.first, st + f.range.last + 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
                 sb.setSpan(RelativeSizeSpan(0.8f), st + f.range.first, st + f.range.last + 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
             }
-            sb.append("\n")
+            // a line that carries on in the next paragraph flows on the same line
+            if (i + 1 < s.end && i !in chapterStarts && continues(i + 1)) sb.append(" ") else sb.append("\n")
             if (i in chapterStarts) sb.append("\n")
         }
         text = sb; paraStart = starts

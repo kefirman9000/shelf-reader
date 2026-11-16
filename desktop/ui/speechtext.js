@@ -265,7 +265,30 @@
     return list.map((c, k) => ({ para: c.para, title: titleCase(c.title), level: hasParts && k > firstPart && !PART_RE.test(c.title) ? 1 : 0 }));
   }
 
-  const api = { normalize, pieces, endPause, vary, chapterOpening, isHeadingOf, headerLines, isPageNumber, improveChapters, words, ordinal, year, roman, titleCase };
+  // ---------- lines broken in the middle of a sentence ----------
+  /** Does paragraph `next` carry on the sentence of `prev`? (Scanned books and PDFs often break every line.) */
+  function continues(prev, next) {
+    const a = String(prev || '').trimEnd(), b = String(next || '').trimStart();
+    if (!a || !b) return false;
+    if (/[.!?…:;"”’»)\]]\s*$/.test(a)) return false;
+    if (HEAD_RE.test(a) && a.length < 80 && /\d|[MDCLXVI]\b/.test(a)) return false;
+    if (HEAD_RE.test(b) && b.length < 80 && /\d|[MDCLXVI]\b/.test(b)) return false;
+    if (a.length < 60 && a === a.toUpperCase() && /\p{L}/u.test(a)) return false;
+    return /^\p{Ll}/u.test(b) || (/^[\p{L}\p{N}]/u.test(b) && /[,—–-]$/.test(a));
+  }
+  /** Joins two pieces of one sentence, mending words split with a hyphen at the line end. */
+  function joinText(a, b) {
+    const x = String(a).trimEnd(), y = String(b).trimStart();
+    return /\p{Ll}-$/u.test(x) && /^\p{Ll}/u.test(y) ? x.slice(0, -1) + y : x + ' ' + y;
+  }
+  /** Merges broken lines into whole paragraphs (for text that has no saved places to keep, like the audiobook maker). */
+  function mendParagraphs(paras) {
+    const out = [];
+    for (const p of paras) { if (out.length && continues(out[out.length - 1], p)) out[out.length - 1] = joinText(out[out.length - 1], p); else out.push(p); }
+    return out;
+  }
+
+  const api = { continues, joinText, mendParagraphs, normalize, pieces, endPause, vary, chapterOpening, isHeadingOf, headerLines, isPageNumber, improveChapters, words, ordinal, year, roman, titleCase };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.SpeechText = api;
 })(typeof self !== 'undefined' ? self : this);

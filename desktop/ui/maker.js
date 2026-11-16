@@ -291,6 +291,8 @@ function improveBookChapters(b) {
   b.chapters = out.filter((c) => c.paras.length);
 }
 function setBook(b) {
+  // lines broken mid-sentence (scanned books, PDFs) become whole paragraphs before anything is read
+  if (!$('#fixLines') || $('#fixLines').checked) for (const c of b.chapters) c.paras = SpeechText.mendParagraphs(c.paras);
   improveBookChapters(b);
   M.headers = SpeechText.headerLines(b.chapters.flatMap((c) => c.paras), b.title, b.author);
   for (const c of b.chapters) { c.on = true; c.chars = c.paras.reduce((a, p) => a + p.length + 1, 0); }
@@ -1061,9 +1063,10 @@ $('#pronFile').onchange = async (e) => {
 };
 $('#pronExport').onclick = () => download(new Blob([JSON.stringify({ fixes: pronList() }, null, 2)], { type: 'application/json' }), 'ShelfReader-pronunciations.json');
 drawPron();
-['#natural', '#numbers'].forEach((x) => { $(x).onchange = () => { PREF[x.slice(1)] = $(x).checked; savePref(); M.samples.clear(); }; });
+['#natural', '#numbers', '#fixLines'].forEach((x) => { $(x).onchange = () => { PREF[x.slice(1)] = $(x).checked; savePref(); M.samples.clear(); }; });
 if (typeof PREF.natural === 'boolean') $('#natural').checked = PREF.natural;
 if (typeof PREF.numbers === 'boolean') $('#numbers').checked = PREF.numbers;
+if (typeof PREF.fixLines === 'boolean') $('#fixLines').checked = PREF.fixLines;
 
 // =====================================================================
 // 3. Export options
