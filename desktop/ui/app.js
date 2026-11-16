@@ -684,6 +684,7 @@ function setupPlayer() {
   setMediaSession();
 }
 function updatePlayer() {
+  setTimeout(updateLeft, 0);
   if (!S.book) return;
   const p = curPara();
   const pct = S.paras.length ? Math.floor((p + 1) * 100 / S.paras.length) : 0;
@@ -1431,3 +1432,39 @@ window.addEventListener('beforeunload', () => savePos(true));
 $('#queueBtn').onclick = showQueue;
 $('#searchAllBtn').onclick = () => searchBooks('');
 setTimeout(renderQueueBtn, 1500);
+
+
+// ---------- time left in the chapter (player) ----------
+function updateLeft() {
+  const el = $('#pLeft'); if (!el || !S.book || !S.paras.length) return;
+  const p = curPara(); const ci = chapterIndex(p);
+  const end = ci + 1 < S.chapters.length ? S.chapters[ci + 1].para : S.paras.length;
+  let chars = 0; for (let i = p; i < end; i++) chars += S.paras[i].length;
+  const mins = Math.round(chars / (14.5 * 60 * currentRate()));
+  el.textContent = (mins < 1 ? 'under a minute' : mins < 60 ? `${mins} min` : `${Math.floor(mins / 60)} h ${mins % 60} min`) + ' left in this chapter';
+}
+
+// ---------- text size: A− / A+, Ctrl + / −, Ctrl + mouse wheel, touchpad pinch ----------
+let zoomTimer = 0;
+function zoomText(d) {
+  const size = Math.max(13, Math.min(40, (S.settings.textSize || 19) + d));
+  if (size === (S.settings.textSize || 19)) return;
+  S.settings.textSize = size;
+  const t = $('#text'); if (t) t.style.fontSize = size + 'px';
+  const pg = $('#pages'); if (pg) pg.style.fontSize = size + 'px';
+  toast(`Text size ${size}`, 900);
+  clearTimeout(zoomTimer);
+  zoomTimer = setTimeout(() => { saveSettings({ textSize: size }); if (S.view === 'reader') { try { applyAppearance(); } catch (_) {} } }, 400);
+}
+$('#zoomIn').onclick = () => zoomText(2);
+$('#zoomOut').onclick = () => zoomText(-2);
+document.addEventListener('wheel', (e) => {
+  if (!e.ctrlKey || S.view !== 'reader') return;   // touchpad pinch arrives as Ctrl + wheel
+  e.preventDefault();
+  zoomText(e.deltaY < 0 ? 1 : -1);
+}, { passive: false });
+document.addEventListener('keydown', (e) => {
+  if (!e.ctrlKey || S.view !== 'reader') return;
+  if (e.key === '=' || e.key === '+') { e.preventDefault(); zoomText(2); }
+  else if (e.key === '-') { e.preventDefault(); zoomText(-2); }
+});

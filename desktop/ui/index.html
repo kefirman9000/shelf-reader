@@ -14,10 +14,10 @@
       <button class="tab" data-view="search">Find books</button>
     </nav>
     <div class="spacer"></div>
-    <button id="importBtn" title="Open EPUB, PDF or TXT files (or drop them on the window)">Import</button>
+    <button id="importBtn" class="icon" title="Add books: open EPUB, PDF or TXT files (or drop them on the window)">＋ Add</button>
     <button id="updBtn" class="primary" hidden></button>
-    <button id="makerBtn" title="Turn a book into MP3 or M4B audiobook files with natural voices">Audiobook maker</button>
-    <button id="edgeBtn" title="Open this library in Edge or Chrome for their more natural voices" hidden>Better voices ▾</button>
+    <button id="makerBtn" title="Turn a book into MP3 or M4B audiobook files with natural voices">🎧 Audiobook maker</button>
+    <button id="edgeBtn" title="More natural voices: Kokoro, Piper, premium, or Edge/Chrome voices" hidden>🗣 Better voices ▾</button>
     <button id="settingsBtn" class="icon" title="Settings">⚙</button>
     <input type="file" id="fileInput" accept=".epub,.pdf,.txt" multiple hidden>
     <input type="file" id="coverInput" accept="image/*" hidden>
@@ -89,7 +89,7 @@
     <input type="range" id="seek" min="0" max="100" value="0" title="Jump to a point in the book">
     <div class="prow">
       <div id="pCover" class="p-cover"></div>
-      <div id="pInfo"><div id="pTitle"></div><div id="pStatus" class="muted"></div></div>
+      <div id="pInfo"><div id="pTitle"></div><div id="pStatus" class="muted"></div><div id="pLeft" class="muted small"></div></div>
       <div class="pctl">
         <button id="pChapPrev" title="Previous chapter (Shift+←)">⏮</button>
         <button id="pPrev" title="Back 15 seconds (←). Double-click: repeat the last sentence">↺15</button>
@@ -98,7 +98,9 @@
         <button id="pChapNext" title="Next chapter (Shift+→)">⏭</button>
       </div>
       <div class="popts">
-        <button id="histBtn" class="icon" title="Places you jumped from (H)">🕘</button>
+        <button id="zoomOut" class="icon chipb" title="Smaller text (Ctrl −, or pinch)">A−</button>
+        <button id="zoomIn" class="icon chipb" title="Bigger text (Ctrl +, or pinch)">A+</button>
+        <button id="histBtn" class="icon chipb" title="Places you jumped from (H)">🕘</button>
         <select id="rateSel" title="Speed for this book"></select>
         <select id="voiceSel" title="Voice for this book"></select>
         <select id="sleepSel" title="Sleep timer">
