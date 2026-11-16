@@ -93,6 +93,17 @@ Your book never leaves your device, except when you choose a premium voice. That
 
 **Hosting it as a web page:** GitHub Pages needs a public repository (or a paid plan for private ones). Go to **Settings → Pages**, choose **Deploy from a branch**, pick `main` and `/ (root)`, and the maker will be at `https://<your-user>.github.io/shelf-reader/`. Making the repository public also lets the apps' **Check for updates** button work.
 
+## Natural voices on the phone
+
+Tap **🗣 Voice → 🌟 Natural voices on this phone** in the player to get much more natural voices that run on the phone itself, even offline:
+
+- **Kokoro** (about 305 MB, one download) has 11 very natural English voices, American and British, men and women.
+- **Piper** (about 64 MB each) has clear voices in English, German, Spanish, French, Italian and Portuguese.
+
+Tap a voice to hear it, then choose **Use it**. Each book can have its own voice. You can remove downloaded voices from the same screen to free up space. These voices are powered by [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) (Apache-2.0), which the build fetches at a pinned version.
+
+**Updates while this repository is private:** open **Settings → GitHub token for updates** on the phone and paste a read-only token. The app shows the steps for making one. After that, **Check for updates** works.
+
 ## Natural reading and getting around
 
 These work on the phone, on the PC, and in the audiobook maker.
