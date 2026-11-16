@@ -1,0 +1,73 @@
+11-16 20:43:13.017  2590  2775 I ShelfSelfTest: READ START voice=neural:vits-piper-en_US-lessac-medium:0
+11-16 20:43:13.128  2590  2775 I ShelfSelfTest: downloading vits-piper-en_US-lessac-medium
+11-16 20:44:19.356  2590  2775 I ShelfSelfTest: voice ready: vits-piper-en_US-lessac-medium
+11-16 20:44:19.419   522  2534 I MediaSessionStack: addSession to bottom of stack | record: com.shelfreader/ShelfReader (userId=0)
+11-16 20:44:19.989   522  2534 I MediaSessionStack: onPlaybackStateChanged - Pushing session to top | record: com.shelfreader/ShelfReader (userId=0)
+11-16 20:44:20.363  2590  2775 I ShelfSelfTest: at 1/101: Chapter I. The Hard Cases
+11-16 20:44:23.135  2590  5240 W sherpa-onnx: config:
+11-16 20:44:23.135  2590  5240 W sherpa-onnx: OfflineTtsConfig(model=OfflineTtsModelConfig(vits=OfflineTtsVitsModelConfig(model="/storage/emulated/0/Android/data/com.shelfreader/files/voices/vits-piper-en_US-lessac-medium/en_US-lessac-medium.onnx", lexicon="", tokens="/storage/emulated/0/Android/data/com.shelfreader/files/voices/vits-piper-en_US-lessac-medium/tokens.txt", data_dir="/storage/emulated/0/Android/data/com.shelfreader/files/voices/vits-piper-en_US-lessac-medium/espeak-ng-data", dict_dir="", noise_scale=0.667, noise_scale_w=0.8, length_scale=1), matcha=OfflineTtsMatchaModelConfig(acoustic_model="", vocoder="", lexicon="", tokens="", data_dir="", dict_dir="", noise_scale=1, length_scale=1), kokoro=OfflineTtsKokoroModelConfig(model="", voices="", tokens="", lexicon="", data_dir="", dict_dir="", length_scale=1, lang=""), zipvoice=OfflineTtsZipvoiceModelConfig(tokens="", text_model="", flow_matching_model="", vocoder="", data_dir="", pinyin_dict="", feat_scale=0.1, t_shift=0.5, target_rms=0.1, guidance_scale=1), kitten=OfflineTtsKittenMod
+11-16 20:44:25.407   522   522 D MediaSessionService: Media button session is changed to com.shelfreader/ShelfReader (userId=0)
+11-16 20:44:27.365  2590  2775 I ShelfSelfTest: at 2/101: This book is full of text that has made readers stumble.
+11-16 20:44:28.365  2590  2775 I ShelfSelfTest: at 3/101: Every sentence should be read or skipped, and reading must n
+11-16 20:44:31.366  2590  2775 I ShelfSelfTest: at 28/101: It cost $4.50 at 9:30 pm on 12/03/1850, said Dr. Smith of 22
+11-16 20:44:38.369  2590  2775 I ShelfSelfTest: at 29/101: King Henry VIII and Louis XIV met in Chapter XII of Volume I
+11-16 20:44:42.371  2590  2775 I ShelfSelfTest: at 30/101: Hidden​ characters­ in﻿ the⁠ middle‍ of words should not bre
+11-16 20:44:44.371  2590  2775 I ShelfSelfTest: at 31/101: Control characters and a broken � symbol and a private  g
+11-16 20:44:46.372  2590  2775 I ShelfSelfTest: at 32/101: Emoji are fine 😀 and so are accents: café, naïve, Zoë, Ångs
+11-16 20:44:49.372  2590  2775 I ShelfSelfTest: at 33/101: A lonely half ��� of an emoji should be dropped quietly.
+11-16 20:44:51.373  2590  2775 I ShelfSelfTest: at 34/101: Footnote markers like this.[12] And this{3} and this.4 Shoul
+11-16 20:44:53.373  2590  2775 I ShelfSelfTest: at 36/101: Visit https://example.com/some/really/long/path?query=1 or w
+11-16 20:44:54.373  2590  2775 I ShelfSelfTest: at 37/101: ALL CAPS SHOUTING SENTENCE WITHOUT ANY STOP
+11-16 20:44:55.374  2590  2775 I ShelfSelfTest: at 38/101: A sentence with no full stop at all river river river river 
+11-16 20:45:03.375  2590  2775 I ShelfSelfTest: at 39/101: river river river river river river river river river river 
+11-16 20:45:11.379  2590  2775 I ShelfSelfTest: at 40/101: river river river river river river river river river river 
+11-16 20:45:19.380  2590  2775 I ShelfSelfTest: at 41/101: river river river river river river river river river river 
+11-16 20:45:27.381  2590  2775 I ShelfSelfTest: at 42/101: river river river river river river river river river river 
+11-16 20:45:35.384  2590  2775 I ShelfSelfTest: at 43/101: river river river river river river river river river river 
+11-16 20:45:43.387  2590  2775 I ShelfSelfTest: at 45/101: ver river river river river river river river river river ri
+11-16 20:45:56.389  2590  2775 I ShelfSelfTest: at 46/101: river river river river river river river river river river 
+11-16 20:46:05.391  2590  2775 I ShelfSelfTest: at 47/101: river river river river river river river river river river 
+11-16 20:46:13.392  2590  2775 I ShelfSelfTest: at 48/101: river river river river river river river river river river 
+11-16 20:46:21.394  2590  2775 I ShelfSelfTest: at 49/101: river river river river river river river river river river 
+11-16 20:46:29.395  2590  2775 I ShelfSelfTest: at 50/101: river river river river river river river river river river 
+11-16 20:46:37.397  2590  2775 I ShelfSelfTest: at 52/101: r river river river river river river river river river rive
+11-16 20:46:50.399  2590  2775 I ShelfSelfTest: at 53/101: river river river river river river river river river river 
+11-16 20:46:58.400  2590  2775 I ShelfSelfTest: at 54/101: river river river river river river river river river river 
+11-16 20:47:06.402  2590  2775 I ShelfSelfTest: at 55/101: river river river river river river river river river river 
+11-16 20:47:14.403  2590  2775 I ShelfSelfTest: at 56/101: river river river river river river river river river river 
+11-16 20:47:22.405  2590  2775 I ShelfSelfTest: at 57/101: river river river river river river river river river river 
+11-16 20:47:30.406  2590  2775 I ShelfSelfTest: at 59/101: river river river river river river river river river river 
+11-16 20:47:43.409  2590  2775 I ShelfSelfTest: at 60/101: river river river river river river river river river river 
+11-16 20:47:51.411  2590  2775 I ShelfSelfTest: at 61/101: river river river river river river river river river river 
+11-16 20:47:59.412  2590  2775 I ShelfSelfTest: at 62/101: river river river river river river river river river river 
+11-16 20:48:07.413  2590  2775 I ShelfSelfTest: at 63/101: river river river river river river river river river river 
+11-16 20:48:15.415  2590  2775 I ShelfSelfTest: at 64/101: river river river river river river river river river river 
+11-16 20:48:23.417  2590  2775 I ShelfSelfTest: at 66/101: ver river river river river river river river river river ri
+11-16 20:48:36.419  2590  2775 I ShelfSelfTest: at 67/101: river river river river river river river river river river 
+11-16 20:48:44.420  2590  2775 I ShelfSelfTest: at 68/101: river river river river river river river river river river 
+11-16 20:48:52.422  2590  2775 I ShelfSelfTest: at 69/101: river river river river river river river river river river 
+11-16 20:49:00.423  2590  2775 I ShelfSelfTest: at 70/101: river river river river river river river river river river 
+11-16 20:49:08.424  2590  2775 I ShelfSelfTest: at 71/101: river river river river river river river river river river 
+11-16 20:49:16.426  2590  2775 I ShelfSelfTest: at 74/101: Lines of a poem that break in the middle of a sentence and c
+11-16 20:49:31.429  2590  2775 I ShelfSelfTest: at 75/101: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+11-16 20:49:43.431  2590  2775 I ShelfSelfTest: at 76/101: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+11-16 20:49:54.433  2590  2775 I ShelfSelfTest: at 77/101: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+11-16 20:50:06.435  2590  2775 I ShelfSelfTest: at 78/101: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+11-16 20:50:18.437  2590  2775 I ShelfSelfTest: at 79/101: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+11-16 20:50:30.439  2590  2775 I ShelfSelfTest: at 80/101: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+11-16 20:50:42.441  2590  2775 I ShelfSelfTest: at 82/101: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+11-16 20:51:00.445  2590  2775 I ShelfSelfTest: at 83/101: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+11-16 20:51:11.449  2590  2775 I ShelfSelfTest: at 84/101: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+11-16 20:51:23.451  2590  2775 I ShelfSelfTest: at 85/101: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+11-16 20:51:35.453  2590  2775 I ShelfSelfTest: at 86/101: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+11-16 20:51:47.455  2590  2775 I ShelfSelfTest: at 87/101: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+11-16 20:51:59.457  2590  2775 I ShelfSelfTest: at 89/101: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+11-16 20:52:16.460  2590  2775 I ShelfSelfTest: at 90/101: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+11-16 20:52:29.462  2590  2775 I ShelfSelfTest: at 92/101: Mixed scripts: Привет, мир.
+11-16 20:52:43.465  2590  2775 I ShelfSelfTest: at 93/101: こんにちは。 مرحبا.
+11-16 20:52:47.466  2590  2775 I ShelfSelfTest: at 94/101: שלום.
+11-16 20:52:49.466  2590  2775 I ShelfSelfTest: at 95/101: "Quotes," she said, “smart quotes” and ‘single ones’ — with 
+11-16 20:52:52.467  2590  2775 I ShelfSelfTest: at 97/101: Tabs and weird spacing and ideographic spaces.
+11-16 20:52:54.467  2590  2775 I ShelfSelfTest: at 101/101: That is the last sentence of the hard cases book.
+11-16 20:52:56.468  2590  2775 I ShelfSelfTest: stopped at 101/101, stalls recovered: 0
+11-16 20:52:56.468  2590  2775 I ShelfSelfTest: SELFTEST DONE OK
