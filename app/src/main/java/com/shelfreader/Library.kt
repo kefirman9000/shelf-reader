@@ -298,6 +298,11 @@ object Settings {
     /** Read-only GitHub token so updates work while the repository is private. */
     fun updateToken(ctx: Context): String? = p(ctx).getString("updateToken", null)?.takeIf { it.isNotBlank() }
     fun setUpdateToken(ctx: Context, t: String?) = p(ctx).edit().putString("updateToken", t?.trim()).apply()
+    /** Justified text in book pages (off on phones by default: narrow lines get wide gaps). */
+    fun justify(ctx: Context) = p(ctx).getBoolean("justify", false)
+    fun setJustify(ctx: Context, v: Boolean) = p(ctx).edit().putBoolean("justify", v).apply()
+    fun compactPlayer(ctx: Context) = p(ctx).getBoolean("compactPlayer", false)
+    fun setCompactPlayer(ctx: Context, v: Boolean) = p(ctx).edit().putBoolean("compactPlayer", v).apply()
     fun fixBrokenLines(ctx: Context) = p(ctx).getBoolean("fixBrokenLines", true)
     fun setFixBrokenLines(ctx: Context, v: Boolean) = p(ctx).edit().putBoolean("fixBrokenLines", v).apply()
     fun naturalPauses(ctx: Context) = p(ctx).getBoolean("naturalPauses", true)

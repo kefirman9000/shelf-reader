@@ -108,7 +108,8 @@ async function renderLibrary() {
     const playing = S.book && S.book.id === b.id && S.playing;
     const extra = (b.percent > 0 ? `<div class="prog" style="width:${b.percent}%"></div>` : '') + (playing ? '<div class="badge">▶</div>' : '');
     return `<div class="book" data-id="${b.id}" title="${esc(b.title)}${b.author ? ' — ' + esc(b.author) : ''}">${coverHtml(b, extra)}
-      <div class="meta"><div class="t">${esc(b.title)}</div><div class="s">${b.percent ? b.percent + '% · ' : ''}${esc(b.author || 'Unknown author')}</div></div></div>`;
+      <div class="meta"><div class="t">${esc(b.title)}</div><div class="s">${b.percent ? b.percent + '% · ' : ''}${esc(b.author || 'Unknown author')}</div></div>
+      <div class="lcols"><div class="lprog"><div style="width:${b.percent || 0}%"></div></div><span>${b.percent ? b.percent + '%' : 'Not started'}</span><span>${esc((b.format || '').toUpperCase())}</span><span>${b.opened ? 'Opened ' + agoDate(b.opened) : 'Never opened'}</span></div></div>`;
   }).join('');
   const empty = $('#libEmpty');
   empty.hidden = list.length > 0;
@@ -622,6 +623,10 @@ function voiceLabel(name, lang, extraGender) {
 }
 function voiceName(v) { return voiceLabel(v.name, v.lang); }
 const isGreatVoice = (v) => /natural|^google/i.test(v.name);
+function agoDate(t) {
+  const d = Math.floor((Date.now() - t) / 86400000);
+  return d < 1 ? 'today' : d < 2 ? 'yesterday' : d < 30 ? `${d} days ago` : new Date(t).toLocaleDateString();
+}
 function fillVoiceSelect() {
   const sel = $('#voiceSel'); if (!sel) return;
   const lang = (navigator.language || 'en').slice(0, 2);
@@ -631,7 +636,8 @@ function fillVoiceSelect() {
   const cur = currentVoiceName();
   const extra = extraVoiceOptions();
   const extraHtml = extra.map(([label, items]) => `<optgroup label="${esc(label)}">${items.map(([v, l]) => `<option value="${esc(v)}">${esc(l)}</option>`).join('')}</optgroup>`).join('');
-  sel.innerHTML = `<option value="">Default voice</option><option value="__more">＋ More natural &amp; premium voices…</option>` + extraHtml +
+  const def = S.voices.find((v) => v.default) || S.voices[0];
+  sel.innerHTML = `<option value="">${def ? 'Default: ' + esc(voiceName(def)) : 'Choose a voice…'}</option><option value="__more">＋ More natural &amp; premium voices…</option>` + extraHtml +
     `<optgroup label="${/Electron/.test(navigator.userAgent) ? 'Windows voices' : 'Browser voices'}">` +
     vs.map((v) => `<option value="${esc(v.name)}">${esc(voiceName(v))}</option>`).join('') +
     '</optgroup>' +
@@ -1225,7 +1231,7 @@ function openSettings() {
     <div class="setrow"><label>Theme</label><select id="sTheme">${opt(['Dark', 'Light', 'Sepia', 'Black'], s.theme || 0)}</select></div>
     <div class="setrow"><label>Font</label><select id="sFont">${opt(['Serif', 'Sans-serif', 'Monospace'], s.font || 0)}</select></div>
     <div class="setrow"><label>Margins</label><select id="sMargin">${opt(['Narrow', 'Medium', 'Wide'], s.margin ?? 1)}</select></div>
-    <div class="setrow"><label>Text size</label><input type="range" id="sSize" min="13" max="34" value="${s.textSize || 19}" style="flex:1"></div>
+    <div class="setrow"><label>Text size</label><input type="range" id="sSize" min="13" max="40" value="${s.textSize || 19}" style="flex:1"><b id="sSizeVal" style="min-width:28px;text-align:right">${s.textSize || 19}</b></div>
     <div class="setrow"><label>Page turn</label><select id="sTurn"><option value="slide">Slide</option><option value="flip" ${s.pageTurn === 'flip' ? 'selected' : ''}>Flip</option></select></div>
     <label class="check"><input type="checkbox" id="sNight" ${s.night && s.night.on ? 'checked' : ''}> Night mode on a schedule</label>
     <div class="setrow"><label>Night mode</label>from <input type="time" id="sNightFrom" value="${esc((s.night && s.night.from) || '21:00')}"> to <input type="time" id="sNightTo" value="${esc((s.night && s.night.to) || '07:00')}">
@@ -1258,7 +1264,7 @@ function openSettings() {
   syncSettingsHTML().then((html) => { const box = $('#syncBox'); if (box) { box.classList.remove('muted'); box.innerHTML = html; bindSyncSettings(openSettings); } });
   $('#sFont').onchange = (e) => saveSettings({ font: +e.target.value });
   $('#sMargin').onchange = (e) => saveSettings({ margin: +e.target.value });
-  $('#sSize').oninput = (e) => { $('#text').style.fontSize = e.target.value + 'px'; };
+  $('#sSize').oninput = (e) => { $('#text').style.fontSize = e.target.value + 'px'; $('#sSizeVal').textContent = e.target.value; };
   $('#sSize').onchange = (e) => saveSettings({ textSize: +e.target.value });
   $('#sClutter').onchange = (e) => saveSettings({ skipClutter: e.target.checked }).then(() => { if (S.playing) speakFrom(S.segIdx); });
   $('#sFixLines').onchange = (e) => saveSettings({ fixBrokenLines: e.target.checked }).then(() => { computeCont(); if (S.view === 'reader') renderReader(); if (S.playing) speakFrom(S.segIdx); });
@@ -1468,3 +1474,16 @@ document.addEventListener('keydown', (e) => {
   if (e.key === '=' || e.key === '+') { e.preventDefault(); zoomText(2); }
   else if (e.key === '-') { e.preventDefault(); zoomText(-2); }
 });
+
+
+// Find books: suggestions so the page doesn't start empty
+(function suggestions() {
+  const box = document.createElement('div');
+  box.id = 'suggest';
+  const picks = ['Jane Austen', 'Sherlock Holmes', 'Mark Twain', 'Agatha Christie', 'Jules Verne', 'Fairy tales', 'Ghost stories', 'Charles Dickens', 'Poetry', 'Philosophy', 'Science fiction', 'Mythology'];
+  box.innerHTML = '<span class="muted small">Try:</span> ' + picks.map((p) => `<button class="chip" data-q="${esc(p)}">${esc(p)}</button>`).join('');
+  $('#searchStatus').after(box);
+  box.querySelectorAll('[data-q]').forEach((b) => { b.onclick = () => { $('#q').value = b.dataset.q; runSearch(b.dataset.q); }; });
+  const obs = new MutationObserver(() => { box.hidden = $('#results').children.length > 0; });
+  obs.observe($('#results'), { childList: true });
+})();

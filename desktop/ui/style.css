@@ -51,7 +51,7 @@ main { flex: 1; min-height: 0; position: relative; }
 .cover .badge { position: absolute; right: 5px; top: 5px; background: rgba(46,94,78,.92); color: #fff; font-size: 11px; border-radius: 8px; padding: 1px 6px; }
 
 #shelf.shelf { display: grid; grid-template-columns: repeat(auto-fill, minmax(136px, 1fr)); grid-auto-rows: 222px; padding: 0 12px 30px;
-  background: linear-gradient(to bottom, transparent 200px, #a87449 200px, #7a4e2d 208px, #4a2e19 214px, rgba(0,0,0,.55) 214px, transparent 222px) 0 0 / 100% 222px, #2b1d14; min-height: calc(100% - 120px); }
+  background: linear-gradient(to bottom, transparent 200px, #a87449 200px, #7a4e2d 208px, #4a2e19 214px, rgba(0,0,0,.55) 214px, transparent 222px) 0 0 / 100% 222px, #2b1d14; }
 #shelf.shelf .book { width: 112px; justify-self: center; align-self: end; margin-bottom: 22px; cursor: pointer; transition: transform .12s; }
 #shelf.shelf .book:hover { transform: translateY(-4px); }
 #shelf.shelf .meta { display: none; }
@@ -281,3 +281,32 @@ nav { background: var(--panel2); padding: 3px; border-radius: 999px; border: 1px
 .setrow { padding: 6px 0; }
 #modal h3 { color: var(--accent2); text-transform: uppercase; font-size: 12px; letter-spacing: .08em; margin: 18px 0 6px; }
 .small { font-size: 12px; }
+
+/* list view: progress and details in columns */
+#shelf .lcols { display: none; }
+#shelf.list .book { display: grid; grid-template-columns: 40px minmax(200px, 1fr) minmax(320px, 1.2fr); }
+#shelf.list .lcols { display: grid; grid-template-columns: 1fr 90px 60px 130px; gap: 12px; align-items: center; font-size: 12px; color: var(--muted); }
+.lprog { height: 6px; border-radius: 99px; background: var(--panel2); overflow: hidden; }
+.lprog > div { height: 100%; background: var(--accent2, var(--accent)); }
+#shelf.list .cover { width: 40px; }
+@media (max-width: 760px) { #shelf.list .book { grid-template-columns: 40px 1fr; } #shelf.list .lcols { display: none; } }
+
+/* Find books suggestions */
+#suggest { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 6px 16px 14px; }
+#suggest .chip { font-size: 13px; padding: 6px 14px; }
+
+/* settings inputs readable in dark themes */
+input[type=time], input[type=number] { background: var(--panel2); color: var(--fg); border: 1px solid var(--line); border-radius: 8px; padding: 5px 8px; color-scheme: dark; }
+body.theme-1 input[type=time], body.theme-2 input[type=time] { color-scheme: light; }
+
+/* narrow windows: the player stacks into two tidy rows */
+@media (max-width: 980px) {
+  .prow { flex-wrap: wrap; row-gap: 6px; }
+  #pInfo { flex: 1 1 calc(100% - 70px); min-width: 0; order: 1; }
+  #pCover { order: 0; }
+  #pTitle, #pStatus, #pLeft { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pctl { order: 2; flex: 1 1 auto; justify-content: center; }
+  .popts { order: 3; flex: 1 1 auto; justify-content: center; }
+  .popts select { max-width: 150px; }
+}
+@media (max-width: 600px) { .popts #voiceSel { max-width: 120px; } #pLeft { display: none; } }

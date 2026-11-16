@@ -305,10 +305,10 @@ fun Context.topBar(title: String, onBack: (() -> Unit)?, vararg actions: Pair<St
 }
 
 /** One row in an action sheet. */
-data class SheetRow(val icon: String, val label: String, val sub: String? = null, val checked: Boolean? = null, val action: () -> Unit)
+data class SheetRow(val icon: String, val label: String, val sub: String? = null, val checked: Boolean? = null, val stay: Boolean = false, val action: () -> Unit)
 
 /** A bottom sheet with large, clear rows (used instead of long pop-up menus). */
-fun Activity.sheet(title: String?, rows: List<SheetRow?>) {
+fun Activity.sheet(title: String?, rows: List<SheetRow?>, scrollTo: Int = -1) {
     val dlg = android.app.Dialog(this)
     val col = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
@@ -320,7 +320,7 @@ fun Activity.sheet(title: String?, rows: List<SheetRow?>) {
     }
     col.addView(View(this).apply { background = roundBg(UiColors.LINE, 3) }, LinearLayout.LayoutParams(dp(40), dp(5)).apply { gravity = android.view.Gravity.CENTER_HORIZONTAL; bottomMargin = dp(8) })
     if (title != null) col.addView(TextView(this).apply {
-        text = title; textSize = 16f; setTextColor(UiColors.MUTED); setPadding(dp(20), dp(4), dp(20), dp(8)); maxLines = 2
+        text = title; textSize = 15f; setTextColor(UiColors.MUTED); setPadding(dp(20), dp(4), dp(20), dp(8)); maxLines = 5
     })
     for (r in rows) {
         if (r == null) { col.addView(View(this).apply { setBackgroundColor(UiColors.LINE) }, LinearLayout.LayoutParams(MATCH, dp(1)).apply { setMargins(dp(16), dp(6), dp(16), dp(6)) }); continue }
@@ -331,7 +331,7 @@ fun Activity.sheet(title: String?, rows: List<SheetRow?>) {
             background = roundBg(0x00000000, 0)
             minimumHeight = dp(52)
             isClickable = true
-            setOnClickListener { dlg.dismiss(); r.action() }
+            setOnClickListener { if (!r.stay) dlg.dismiss(); r.action() }
         }
         row.addView(TextView(this).apply { text = r.icon; textSize = 20f; gravity = android.view.Gravity.CENTER }, LinearLayout.LayoutParams(dp(34), WRAP))
         val texts = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), 0, 0, 0) }
@@ -342,6 +342,7 @@ fun Activity.sheet(title: String?, rows: List<SheetRow?>) {
         col.addView(row)
     }
     val scroll = android.widget.ScrollView(this).apply { addView(col) }
+    if (scrollTo >= 0) scroll.post { col.getChildAt((scrollTo + (if (title != null) 2 else 1)).coerceAtMost(col.childCount - 1))?.let { scroll.scrollTo(0, maxOf(0, it.top - dp(80))) } }
     dlg.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
     dlg.setContentView(scroll)
     dlg.window?.apply {
@@ -349,6 +350,9 @@ fun Activity.sheet(title: String?, rows: List<SheetRow?>) {
         setGravity(android.view.Gravity.BOTTOM)
         setLayout(MATCH, WRAP)
         attributes = attributes.apply { windowAnimations = android.R.style.Animation_InputMethod }
+
+        val maxH = (resources.displayMetrics.heightPixels * 0.85).toInt()
+        scroll.viewTreeObserver.addOnGlobalLayoutListener { if (scroll.height > maxH) setLayout(MATCH, maxH) }
     }
     dlg.show()
 }
@@ -402,4 +406,13 @@ fun Context.settingRow(icon: String, label: String, sub: String?, switch: Boolea
     if (switch != null) { sw = android.widget.Switch(this).apply { isChecked = switch; isClickable = false; isFocusable = false }; row.addView(sw) }
     row.setOnClickListener { sw?.let { it.isChecked = !it.isChecked }; onClick(sw) }
     return row
+}
+
+
+/** "CHAPTER I. Down the Rabbit-Hole" → "Chapter I · Down the Rabbit-Hole" (for lists and headers). */
+fun prettyChapter(t: String): String {
+    val m = Regex("^(CHAPTER|PART|BOOK|VOLUME|ACT|CANTO|LETTER|STAVE)\\s+([A-Z0-9]+)\\.?\\s*[:.—–-]?\\s*(.*)$").find(t.trim()) ?: return t
+    val kw = m.groupValues[1].lowercase().replaceFirstChar { it.uppercase() }
+    val rest = m.groupValues[3].trim()
+    return "$kw ${m.groupValues[2]}" + if (rest.isNotEmpty()) " · " + SpeechText.titleCase(rest) else ""
 }

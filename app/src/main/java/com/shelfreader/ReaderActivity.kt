@@ -62,6 +62,8 @@ class ReaderActivity : Activity(), BookPageView.Host {
     private lateinit var playBtn: TextView
     private lateinit var speedBtn: TextView
     private lateinit var layoutChip: TextView
+    private lateinit var compactBtn: TextView
+    private lateinit var chipScroll: View
     private lateinit var seek: android.widget.SeekBar
     private lateinit var seekLabel: TextView
     private var seeking = false
@@ -267,6 +269,8 @@ class ReaderActivity : Activity(), BookPageView.Host {
         spacer()
         row.addView(iconBtn("⏭", "Next chapter", 48) { stepChapter(1) })
         spacer()
+        compactBtn = iconBtn("⌄", "Smaller player (more room for the text)", 40) { setCompact(!Settings.compactPlayer(this)) }
+        row.addView(compactBtn)
         controls.addView(row, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(2) })
         val chips = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(8), 0, 0) }
         speedBtn = chip("1×") { pickSpeed() }
@@ -278,7 +282,9 @@ class ReaderActivity : Activity(), BookPageView.Host {
         chips.addView(layoutChip, cg())
         chips.addView(chip("🔖 Notes") { showNotes() }, cg())
         chips.addView(chip("🔎 Find") { searchInBook() }, cg())
-        controls.addView(android.widget.HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(chips) })
+        chips.setPadding(0, dp(8), dp(24), 0)
+        chipScroll = android.widget.HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; isFillViewport = false; addView(chips) }
+        controls.addView(chipScroll)
 
         val content = FrameLayout(this)
         content.addView(list, FrameLayout.LayoutParams(MATCH, MATCH))
@@ -294,6 +300,7 @@ class ReaderActivity : Activity(), BookPageView.Host {
         showLayout()
         applyAppearance()
         refreshButtons()
+        setCompact(Settings.compactPlayer(this))
 
         Thread {
             try {
@@ -433,7 +440,7 @@ class ReaderActivity : Activity(), BookPageView.Host {
         val s = service()
         val shown = if (bookMode && !isPlaying()) bookView.topPara() else curPara
         val pct = if (paras.isNotEmpty()) (shown + 1) * 100 / paras.size else 0
-        val ch = chapterIndex(shown).let { if (it >= 0) chapters[it].title else book.author.ifBlank { "Unknown author" } }
+        val ch = chapterIndex(shown).let { if (it >= 0) prettyChapter(chapters[it].title) else book.author.ifBlank { "Unknown author" } }
         val sleep = s?.sleepText()?.let { " · $it" } ?: ""
         status.text = "$ch · $pct%$sleep"
         if (!seeking && paras.isNotEmpty()) {
@@ -445,6 +452,16 @@ class ReaderActivity : Activity(), BookPageView.Host {
             val mins = (chars / (15.0 * 60 * Settings.rateFor(this, book.id))).toInt()
             seekLabel.text = "$pct% of the book · " + (if (mins < 1) "under a minute" else if (mins < 60) "$mins min" else "${mins / 60} h ${mins % 60} min") + " left in this chapter$sleep"
         }
+    }
+
+    /** Compact player: one row of buttons, so the text gets more of the screen. */
+    private fun setCompact(on: Boolean) {
+        Settings.setCompactPlayer(this, on)
+        seekLabel.visibility = if (on) View.GONE else View.VISIBLE
+        chipScroll.visibility = if (on) View.GONE else View.VISIBLE
+        compactBtn.text = if (on) "⌃" else "⌄"
+        compactBtn.contentDescription = if (on) "Bigger player (speed, voice, sleep and more)" else "Smaller player (more room for the text)"
+        (playBtn.layoutParams as? LinearLayout.LayoutParams)?.let { val sz = dp(if (on) 52 else 68); it.width = sz; it.height = sz; playBtn.layoutParams = it }
     }
 
     private fun stepChapter(d: Int) {
@@ -654,6 +671,7 @@ class ReaderActivity : Activity(), BookPageView.Host {
             bookView.accent = ACCENT; bookView.paraColor = theme.para; bookView.sentColor = theme.sent
             bookView.marginDp = margin
             bookView.turnStyle = Settings.pageTurn(this)
+            bookView.justify = Settings.justify(this)
             bookView.paint.typeface = font
             bookView.paint.textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, textSize, resources.displayMetrics)
             if (loaded && bookMode && curSection >= 0) {
@@ -968,12 +986,10 @@ class ReaderActivity : Activity(), BookPageView.Host {
         if (!loaded) return
         if (chapters.isEmpty()) { toast("No chapters were found in this book."); return }
         val cur = chapterIndex(curPara)
-        val labels = chapters.mapIndexed { k, c -> (if (k == cur) "▶ " else "") + (if (c.level == 1) "      " else "") + c.title }.toTypedArray()
-        val dlg = AlertDialog.Builder(this)
-            .setTitle("Chapters")
-            .setItems(labels) { _, w -> goTo(chapters[w].para) }
-            .show()
-        if (cur > 0) dlg.listView?.setSelection(cur)
+        sheet("Contents · ${chapters.size} chapters", chapters.mapIndexed { k, c ->
+            val pct = (c.para + 1) * 100 / maxOf(1, paras.size)
+            SheetRow(if (k == cur) "▶" else if (c.level == 1) "  ·" else "📖", (if (c.level == 1) "   " else "") + prettyChapter(c.title), if (k == cur) "You're here · $pct%" else "$pct%") { goTo(chapters[k].para) }
+        }, scrollTo = cur)
     }
 
     // ---------- sleep timer ----------
@@ -1223,34 +1239,30 @@ class ReaderActivity : Activity(), BookPageView.Host {
             it.locale.language == lang &&
                 !(it.features?.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) ?: false)
         }
-        val choices = ArrayList<VoiceChoice>()
-        choices += VoiceChoice(null, "🌟 Natural voices on this phone (Kokoro, Piper)…" + (NeuralVoices.label(Settings.voiceFor(this, book.id))?.let { "  ✓ $it" } ?: ""))
-        choices += VoiceChoice(null, "Phone's default voice")
-        choices += VoiceNames.friendly(usable).map { VoiceChoice(it.first, it.second) }
         val chosen = Settings.voiceFor(this, book.id)
-        var picked = if (NeuralVoices.isNeural(chosen)) 0 else choices.indexOfFirst { it.voice?.name == chosen }.let { if (it < 0) 1 else it }
-        var dialog: AlertDialog? = null
         val wasPlaying = isPlaying()
         if (wasPlaying) startService(Intent(this, TtsService::class.java).setAction(TtsService.ACTION_PAUSE))
-
-        AlertDialog.Builder(this)
-            .setTitle("Voice for this book. Tap to hear it.")
-            .setSingleChoiceItems(choices.map { it.label }.toTypedArray(), picked) { _, w ->
-                if (w == 0) { engine.stop(); dialog?.dismiss(); neuralPicker(); return@setSingleChoiceItems }
-                picked = w
-                preview(engine, choices[w].voice)
+        val rows = ArrayList<SheetRow?>()
+        val natural = NeuralVoices.label(chosen)
+        rows += SheetRow("🌟", "Natural voices (Kokoro, Piper)", natural?.let { "In use: $it" } ?: "Much more human. Run on this phone, even offline") { engine.stop(); neuralPicker() }
+        rows += null
+        fun use(name: String?, label: String) {
+            Settings.setBookVoice(this, book.id, name)
+            TtsService.instance?.applySettings(false)
+            toast("Using $label. Tap another to compare.")
+        }
+        rows += SheetRow(if (chosen == null) "✅" else "📱", "Phone's default voice", "Whatever is set in Android's speech settings", stay = true) { engine.stop(); use(null, "the phone's default voice") }
+        for ((v, label) in VoiceNames.friendly(usable)) {
+            val name = label.substringBefore("  (")
+            val where = if (v.isNetworkConnectionRequired) "Google voice · needs internet" else "Google voice · on this phone"
+            val hq = if (v.quality >= Voice.QUALITY_VERY_HIGH) " · ★ high quality" else ""
+            rows += SheetRow(if (v.name == chosen) "✅" else "🔊", name, "$where$hq · tap to hear and use", stay = true) {
+                preview(engine, v); use(v.name, name)
             }
-            .setPositiveButton("Use this voice") { _, _ ->
-                engine.stop()
-                if (picked == 0) return@setPositiveButton
-                Settings.setBookVoice(this, book.id, choices[picked].voice?.name)
-                TtsService.instance?.applySettings(false)
-                if (wasPlaying) startService(Intent(this, TtsService::class.java).setAction(TtsService.ACTION_TOGGLE))
-                else toast("Voice saved. Press Play to listen.")
-            }
-            .setNeutralButton("Get more voices…") { _, _ -> engine.stop(); openTtsSettings() }
-            .setNegativeButton("Cancel") { _, _ -> engine.stop() }
-            .show().also { dialog = it }
+        }
+        rows += null
+        rows += SheetRow("⬇", "Get more Google voices", "Opens Android's speech settings") { engine.stop(); openTtsSettings() }
+        sheet("Voice for this book · tap to hear it", rows)
     }
 
     private fun preview(engine: TextToSpeech, v: Voice?) {
@@ -1527,6 +1539,7 @@ class ReaderActivity : Activity(), BookPageView.Host {
                 AlertDialog.Builder(this).setItems(READER_THEMES.map { it.name }.toTypedArray()) { _, w -> Settings.setTheme(this, w); loadAppearance(); applyAppearance() }.show()
             },
             SheetRow(if (bookMode) "📜" else "📖", if (bookMode) "Switch to scrolling" else "Switch to book pages", if (bookMode) "One long page" else "Swipe or tap the edges to turn pages") { setLayoutMode(!bookMode) },
+            SheetRow("☰", "Straight right edge (justified)", "Off: even word spacing, easier on narrow screens", Settings.justify(this)) { Settings.setJustify(this, !Settings.justify(this)); loadAppearance(); applyAppearance() },
             SheetRow("🔠", "Font, margins, page turn, night mode…") { appearanceMenu() }
         ))
     }

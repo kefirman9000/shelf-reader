@@ -89,6 +89,7 @@ class MainActivity : Activity() {
     private lateinit var continueProgress: ProgressBar
     private lateinit var continuePlayBtn: TextView
     private var tab = 0
+    private var topActions: List<View> = emptyList()
     private lateinit var libraryQueryBox: EditText
     private var libraryQuery = ""
     private lateinit var searchProgress: ProgressBar
@@ -123,6 +124,7 @@ class MainActivity : Activity() {
             "🔎" to ("Search inside your books" to { searchBooks() }),
             "＋" to ("Add a book from your phone" to { pickFile() }))
         topTitle = titles.first
+        topActions = (bar0.childCount - 2 until bar0.childCount).map { bar0.getChildAt(it) }
         root.addView(bar0)
 
         // Library pane: continue card, chips, then shelf/grid/list
@@ -162,24 +164,21 @@ class MainActivity : Activity() {
 
         val bar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(dp(12), dp(8), dp(12), dp(8)) }
         filterBtn = chip("All books ▾") {
-            val names = listOf("All books") + Collections.names(this@MainActivity) + "Manage collections…"
-            AlertDialog.Builder(this@MainActivity).setTitle("Show")
-                .setItems(names.toTypedArray()) { _, w ->
-                    when (w) {
-                        0 -> Settings.setLibraryFilter(this@MainActivity, "")
-                        names.size - 1 -> { manageCollections(); return@setItems }
-                        else -> Settings.setLibraryFilter(this@MainActivity, names[w])
-                    }
-                    refreshLibrary()
-                }.show()
+            val cur = Settings.libraryFilter(this@MainActivity)
+            val rows = ArrayList<SheetRow?>()
+            rows += SheetRow(if (cur.isEmpty()) "✅" else "📚", "All books") { Settings.setLibraryFilter(this@MainActivity, ""); refreshLibrary() }
+            for (n in Collections.names(this@MainActivity)) rows += SheetRow(if (cur == n) "✅" else "🗂", n) { Settings.setLibraryFilter(this@MainActivity, n); refreshLibrary() }
+            rows += null
+            rows += SheetRow("⚙", "Manage collections…") { manageCollections() }
+            sheet("Show", rows)
         }
         viewBtn = chip("Grid ▾") {
-            AlertDialog.Builder(this@MainActivity).setTitle("Library view")
-                .setItems(VIEW_NAMES.toTypedArray()) { _, w -> Settings.setLibraryView(this@MainActivity, w); refreshLibrary() }.show()
+            val icons = listOf("🪵", "▦", "☰"); val subs = listOf("Covers on wooden shelves", "Big covers", "Titles with details")
+            sheet("Library view", VIEW_NAMES.mapIndexed { w, n -> SheetRow(if (Settings.libraryView(this@MainActivity) == w) "✅" else icons[w], n, subs[w]) { Settings.setLibraryView(this@MainActivity, w); refreshLibrary() } })
         }
         sortBtn = chip("Recent ▾") {
-            AlertDialog.Builder(this@MainActivity).setTitle("Sort by")
-                .setItems(SORT_NAMES.toTypedArray()) { _, w -> Settings.setLibrarySort(this@MainActivity, w); refreshLibrary() }.show()
+            val subs = listOf("Last opened first", "A to Z", "By author's name", "Furthest along first")
+            sheet("Sort by", SORT_NAMES.mapIndexed { w, n -> SheetRow(if (Settings.librarySort(this@MainActivity) == w) "✅" else "↕", n, subs[w]) { Settings.setLibrarySort(this@MainActivity, w); refreshLibrary() } })
         }
         val gap = { LinearLayout.LayoutParams(WRAP, WRAP).apply { rightMargin = dp(8) } }
         bar.addView(filterBtn, gap()); bar.addView(viewBtn, gap()); bar.addView(sortBtn, gap())
@@ -461,6 +460,7 @@ class MainActivity : Activity() {
             t.background = roundBg(if (on) 0x2256B394 else 0x00000000, 14)
         }
         topTitle.text = listOf("Shelf Reader", "Find free books", "Settings")[k]
+        topActions.forEach { it.visibility = if (k == 0) View.VISIBLE else View.GONE }
         when (k) { 0 -> refreshLibrary(); 1 -> searchBox.requestFocus(); 2 -> buildSettings() }
     }
 
@@ -592,7 +592,9 @@ class MainActivity : Activity() {
 
         // "Continue" bar for the last book you were reading
         val last = Settings.lastBook(this)?.let { id -> all.firstOrNull { it.id == id } }
-        continueBar.visibility = if (last != null) View.VISIBLE else View.GONE
+        // landscape: the books need the room, so the Continue card hides (the player and notification still work)
+        val landscape = resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+        continueBar.visibility = if (last != null && !landscape) View.VISIBLE else View.GONE
         if (last != null) {
             val pct = Library.percent(this, last)
             continueText.text = last.title
@@ -1005,11 +1007,65 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun updateResults() {
-        resultsList.adapter = TwoLineAdapter(this, results.map {
-            it.title to "${it.author.ifBlank { "Unknown author" }} · ${it.source}"
-        })
+    /** Best matches first: the words you typed in the author or title. */
+    private fun score(r: SearchResult, q: String): Int {
+        val words = q.lowercase().split(Regex("\\s+")).filter { it.length > 1 }
+        val a = r.author.lowercase(); val t = r.title.lowercase()
+        var s = 0
+        if (a.contains(q.lowercase())) s += 50
+        if (t.contains(q.lowercase())) s += 40
+        for (w in words) { if (a.contains(w)) s += 10; if (t.contains(w)) s += 8 }
+        if (r.url != null || r.source.contains("Standard")) s += 3
+        return s
     }
+
+    private fun updateResults() {
+        val q = searchBox.text.toString().trim()
+        val sorted = results.withIndex().sortedWith(compareByDescending<IndexedValue<SearchResult>> { score(it.value, q) }.thenBy { it.index }).map { it.value }
+        results.clear(); results.addAll(sorted)
+        resultsList.adapter = ResultAdapter()
+    }
+
+    /** Search results with covers. */
+    private inner class ResultAdapter : BaseAdapter() {
+        override fun getCount() = results.size
+        override fun getItem(position: Int): Any = results[position]
+        override fun getItemId(position: Int) = position.toLong()
+        override fun getView(position: Int, convertView: View?, parent: ViewGroup?): View {
+            val row = (convertView as? LinearLayout) ?: LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(14), dp(8), dp(14), dp(8))
+                addView(ImageView(this@MainActivity).apply { scaleType = ImageView.ScaleType.CENTER_CROP }, LinearLayout.LayoutParams(dp(44), dp(64)))
+                addView(LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.VERTICAL; setPadding(dp(12), 0, 0, 0)
+                    addView(TextView(this@MainActivity).apply { textSize = 16f; setTextColor(UiColors.FG); setTypeface(typeface, android.graphics.Typeface.BOLD); maxLines = 2 })
+                    addView(TextView(this@MainActivity).apply { textSize = 13f; setTextColor(UiColors.MUTED); maxLines = 2 })
+                }, LinearLayout.LayoutParams(0, WRAP, 1f))
+            }
+            val r = results[position]
+            val img = row.getChildAt(0) as ImageView
+            val texts = row.getChildAt(1) as LinearLayout
+            (texts.getChildAt(0) as TextView).text = r.title
+            (texts.getChildAt(1) as TextView).text = "${r.author.ifBlank { "Unknown author" }} · ${r.source}" + (r.info?.let { "\n$it" } ?: "")
+            img.tag = r.cover
+            img.setImageDrawable(ColorDrawable(UiColors.SURFACE2))
+            val url = r.cover
+            if (url != null) {
+                val cached = thumbCache.get(url)
+                if (cached != null) img.setImageBitmap(cached)
+                else pool.execute {
+                    val bmp = try { Net.open(url).inputStream.use { android.graphics.BitmapFactory.decodeStream(it) } } catch (t: Throwable) { null }
+                    if (bmp != null) {
+                        val small = android.graphics.Bitmap.createScaledBitmap(bmp, 88, (88f * bmp.height / maxOf(1, bmp.width)).toInt().coerceAtLeast(1), true)
+                        thumbCache.put(url, small)
+                        runOnUiThread { if (img.tag == url) img.setImageBitmap(small) }
+                    }
+                }
+            }
+            return row
+        }
+    }
+    private val thumbCache = android.util.LruCache<String, android.graphics.Bitmap>(80)
 
     /** Book details (cover, description, info) before downloading. */
     private fun confirmDownload(r: SearchResult) {

@@ -106,6 +106,8 @@ class BookPageView(ctx: Context) : View(ctx) {
 
     /** Is paragraph i the rest of a sentence broken off in paragraph i-1? */
     var continues: (Int) -> Boolean = { false }
+    /** Justified (both edges straight) or left-aligned text. */
+    var justify = false
 
     fun setContent(
         section: Section, paras: List<String>, chapters: List<Chapter>, pics: (Int) -> List<Bitmap>,
@@ -184,7 +186,7 @@ class BookPageView(ctx: Context) : View(ctx) {
             .setLineSpacing(0f, 1.45f)
             .setIncludePad(false)
             .setHyphenationFrequency(Layout.HYPHENATION_FREQUENCY_NORMAL)
-            .setJustificationMode(Layout.JUSTIFICATION_MODE_INTER_WORD)
+            .setJustificationMode(if (justify) Layout.JUSTIFICATION_MODE_INTER_WORD else Layout.JUSTIFICATION_MODE_NONE)
         val l = b.build()
         layout = l
         // split into pages; every chapter heading starts a new page
