@@ -257,7 +257,8 @@
     for (const f of list) {
       const nx = (paras[f.para + 1] || '').trim();
       if (nx && nx.length < 60 && /^[MDCLXVI\d]+\.?$|^(chapter|book|canto|letter|stave)\s+\S+\.?$/i.test(f.title.trim()) && SpeechText_isHeadingOf(paras[f.para] || '', f.title)
-        && !/[.!?,;]$/.test(nx) && !HEAD_RE.test(nx) && !list.some((g) => g.para === f.para + 1)) f.title = titleCase(f.title.replace(/\.$/, '')) + ': ' + titleCase(nx);
+        && !/[.!?,;]$/.test(nx) && !HEAD_RE.test(nx) && !list.some((g) => g.para === f.para + 1)
+        && !/^\p{Ll}/u.test(nx) && !continues(nx, paras[f.para + 2] || '')) f.title = titleCase(f.title.replace(/\.$/, '')) + ': ' + titleCase(nx);
     }
     // parts and nesting
     const hasParts = list.some((c) => PART_RE.test(c.title)) && list.some((c) => !PART_RE.test(c.title));
@@ -284,7 +285,10 @@
   /** Merges broken lines into whole paragraphs (for text that has no saved places to keep, like the audiobook maker). */
   function mendParagraphs(paras) {
     const out = [];
-    for (const p of paras) { if (out.length && continues(out[out.length - 1], p)) out[out.length - 1] = joinText(out[out.length - 1], p); else out.push(p); }
+    for (const p of paras) {
+      if (isPageNumber(p)) continue;   // page numbers are never read, and often sit in the middle of a sentence
+      if (out.length && continues(out[out.length - 1], p)) out[out.length - 1] = joinText(out[out.length - 1], p); else out.push(p);
+    }
     return out;
   }
 

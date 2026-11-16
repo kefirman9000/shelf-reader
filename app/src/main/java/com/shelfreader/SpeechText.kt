@@ -284,7 +284,8 @@ object SpeechText {
         list = list.map { c ->
             val nx = paras.getOrNull(c.para + 1)?.trim() ?: ""
             if (nx.isNotEmpty() && nx.length < 60 && BARE.matches(c.title.trim()) && isHeadingOf(paras[c.para], c.title) &&
-                !Regex("[.!?,;]$").containsMatchIn(nx) && !HEAD_RE.matches(nx) && (c.para + 1) !in paraSet
+                !Regex("[.!?,;]$").containsMatchIn(nx) && !HEAD_RE.matches(nx) && (c.para + 1) !in paraSet &&
+                !nx[0].isLowerCase() && !continues(nx, paras.getOrNull(c.para + 2) ?: "")
             ) Chapter(titleCase(c.title.removeSuffix(".")) + ": " + titleCase(nx), c.para) else c
         }.toMutableList()
         val hasParts = list.any { PART_RE.containsMatchIn(it.title) } && list.any { !PART_RE.containsMatchIn(it.title) }
