@@ -267,15 +267,45 @@
   }
 
   // ---------- lines broken in the middle of a sentence ----------
-  /** Does paragraph `next` carry on the sentence of `prev`? (Scanned books and PDFs often break every line.) */
-  function continues(prev, next) {
+  const ENDS_SENTENCE = /[.!?…:;"”’»)\]]\s*$/;
+  /** First letter or digit of `b`, after any opening quotes or brackets. */
+  const firstChar = (b) => (String(b || '').trimStart().replace(/^[“"‘'(\[]+/, '')[0] || '');
+  /**
+   * For books where every printed line became its own paragraph (scans, PDFs, converted text): the usual
+   * length of a full line. 0 for ordinary books, where only the stricter rules in continues() apply.
+   */
+  function lineLength(paras) {
+    if (!paras || paras.length < 30) return 0;
+    let pairs = 0, open = 0, lower = 0;
+    for (let i = 1; i < paras.length; i++) {
+      const a = String(paras[i - 1]).trimEnd();
+      if (a.length < 20) continue;
+      pairs++;
+      if (!ENDS_SENTENCE.test(a)) { open++; if (/^\p{Ll}/u.test(firstChar(paras[i]))) lower++; }
+    }
+    // lots of lines stop mid-sentence, and many of them carry on in lower case: a line-broken book
+    if (pairs < 20 || open < pairs * 0.25 || lower < pairs * 0.08) return 0;
+    const lens = paras.map((p) => String(p).trim().length).filter((n) => n >= 20).sort((x, y) => x - y);
+    return lens.length ? lens[Math.floor(lens.length / 2)] : 0;
+  }
+  /**
+   * Does paragraph `next` carry on the sentence of `prev`? (Scanned books and PDFs often break every line.)
+   * `lineLen` from lineLength(): in line-broken books a full-length line that stops mid-sentence always carries
+   * on, even into a capital ("Mr. Darcy", "I"), a number or a quote.
+   */
+  function continues(prev, next, lineLen = 0) {
     const a = String(prev || '').trimEnd(), b = String(next || '').trimStart();
     if (!a || !b) return false;
-    if (/[.!?…:;"”’»)\]]\s*$/.test(a)) return false;
+    if (ENDS_SENTENCE.test(a)) return false;
     if (HEAD_RE.test(a) && a.length < 80 && /\d|[MDCLXVI]\b/.test(a)) return false;
     if (HEAD_RE.test(b) && b.length < 80 && /\d|[MDCLXVI]\b/.test(b)) return false;
     if (a.length < 60 && a === a.toUpperCase() && /\p{L}/u.test(a)) return false;
-    return /^\p{Ll}/u.test(b) || (/^[\p{L}\p{N}]/u.test(b) && /[,—–-]$/.test(a));
+    const f = firstChar(b);
+    if (!f) return false;
+    if (/\p{Ll}/u.test(f)) return true;
+    // after a comma or dash the sentence goes on, even into a name or a quote
+    if (/[,—–-]$/.test(a) && /[\p{L}\p{N}]/u.test(f)) return true;
+    return lineLen > 0 && a.length >= lineLen * 0.7 && /[\p{L}\p{N}]$/u.test(a) && /[\p{L}\p{N}]/u.test(f);
   }
   /** Joins two pieces of one sentence, mending words split with a hyphen at the line end. */
   function joinText(a, b) {
@@ -285,14 +315,15 @@
   /** Merges broken lines into whole paragraphs (for text that has no saved places to keep, like the audiobook maker). */
   function mendParagraphs(paras) {
     const out = [];
+    const len = lineLength(paras);
     for (const p of paras) {
       if (isPageNumber(p)) continue;   // page numbers are never read, and often sit in the middle of a sentence
-      if (out.length && continues(out[out.length - 1], p)) out[out.length - 1] = joinText(out[out.length - 1], p); else out.push(p);
+      if (out.length && continues(out[out.length - 1], p, len)) out[out.length - 1] = joinText(out[out.length - 1], p); else out.push(p);
     }
     return out;
   }
 
-  const api = { continues, joinText, mendParagraphs, normalize, pieces, endPause, vary, chapterOpening, isHeadingOf, headerLines, isPageNumber, improveChapters, words, ordinal, year, roman, titleCase };
+  const api = { continues, lineLength, joinText, mendParagraphs, normalize, pieces, endPause, vary, chapterOpening, isHeadingOf, headerLines, isPageNumber, improveChapters, words, ordinal, year, roman, titleCase };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.SpeechText = api;
 })(typeof self !== 'undefined' ? self : this);

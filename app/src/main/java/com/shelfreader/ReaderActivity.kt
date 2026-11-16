@@ -51,6 +51,16 @@ class ReaderActivity : Activity(), BookPageView.Host {
     private var pics: Map<Int, List<String>> = emptyMap()
     /** cont[i]: paragraph i is the rest of a sentence broken off at the end of paragraph i-1 */
     private var cont = BooleanArray(0)
+
+    /** Works out which paragraphs carry on a sentence from the one before. */
+    private fun findBrokenLines(ps: List<String>): BooleanArray {
+        if (!Settings.fixBrokenLines(this)) return BooleanArray(ps.size)
+        val len = SpeechText.lineLength(ps)
+        return BooleanArray(ps.size) { i -> i > 0 && SpeechText.continues(ps[i - 1], ps[i], len) }
+    }
+
+    /** The first paragraph of the run that [p] belongs to (the row that shows it in the scrolling view). */
+    private fun rowOf(p: Int): Int { var k = p; while (k > 0 && cont.getOrElse(k) { false }) k--; return k }
     private var notes: List<Note> = emptyList()
     private var marks: Map<Int, String> = emptyMap()
 
@@ -106,16 +116,31 @@ class ReaderActivity : Activity(), BookPageView.Host {
         override fun getCount() = paras.size
         override fun getItem(position: Int): Any = paras[position]
         override fun getItemId(position: Int) = position.toLong()
+        override fun getViewTypeCount() = 2
+        override fun getItemViewType(position: Int) = if (cont.getOrElse(position) { false }) 1 else 0
         override fun getView(position: Int, convertView: View?, parent: ViewGroup?): View {
+            // a line that carries on the sentence before it is shown inside that paragraph's row
+            if (cont.getOrElse(position) { false }) return convertView ?: View(this@ReaderActivity).apply { layoutParams = AbsListView.LayoutParams(MATCH, 0) }
             val tv = (convertView as? TextView) ?: TextView(this@ReaderActivity).apply { setLineSpacing(0f, 1.3f) }
             val m = dp(margin)
-            // lines broken mid-sentence sit close together, like one paragraph
-            tv.setPadding(m, if (cont.getOrElse(position) { false }) 0 else dp(7), m, if (cont.getOrElse(position + 1) { false }) 0 else dp(7))
+            tv.setPadding(m, dp(7), m, dp(7))
             tv.textSize = textSize
             tv.typeface = font
             tv.setTextColor(theme.fg)
-            tv.setBackgroundColor(if (position == curPara) theme.para else Color.TRANSPARENT)
-            tv.text = rowText(position)
+            var end = position
+            while (cont.getOrElse(end + 1) { false }) end++
+            tv.setBackgroundColor(if (curPara in position..end) theme.para else Color.TRANSPARENT)
+            if (end == position) tv.text = rowText(position)
+            else {
+                val sb = SpannableStringBuilder(rowText(position))
+                for (j in position + 1..end) {
+                    // "won-" + "derful" → "wonderful"; otherwise a space
+                    if (!Regex("\\p{Ll}-$").containsMatchIn(paras[j - 1].trimEnd()) || paras[j].trimStart().firstOrNull()?.isLowerCase() != true) sb.append(" ")
+                    else if (sb.isNotEmpty() && sb[sb.length - 1] == '-') sb.delete(sb.length - 1, sb.length)
+                    sb.append(rowText(j))
+                }
+                tv.text = sb
+            }
             return tv
         }
     }
@@ -312,14 +337,14 @@ class ReaderActivity : Activity(), BookPageView.Host {
                 runOnUiThread {
                     paras = d.paras
                     chapters = d.chapters
-                    cont = BooleanArray(d.paras.size) { i -> i > 0 && Settings.fixBrokenLines(this) && SpeechText.continues(d.paras[i - 1], d.paras[i]) }
+                    cont = findBrokenLines(d.paras)
                     pics = pm
                     sections = buildSections()
                     loaded = true
                     reloadNotes()
                     curPara = currentPara()
                     adapter.notifyDataSetChanged()
-                    list.setSelectionFromTop(curPara, dp(60))
+                    list.setSelectionFromTop(rowOf(curPara), dp(60))
                     if (bookMode) {
                         if (curPara == 0 && !isPlaying()) showSection(0, 0) else showPara(curPara, 0)
                     }
@@ -429,8 +454,9 @@ class ReaderActivity : Activity(), BookPageView.Host {
             } else {
                 adapter.notifyDataSetChanged()
                 if (paraChanged) {
-                    val offscreen = curPara < list.firstVisiblePosition || curPara >= list.lastVisiblePosition
-                    if (offscreen && System.currentTimeMillis() - lastTouch > 6000) list.setSelectionFromTop(curPara, dp(60))
+                    val row = rowOf(curPara)
+                    val offscreen = row < list.firstVisiblePosition || row >= list.lastVisiblePosition
+                    if (offscreen && System.currentTimeMillis() - lastTouch > 6000) list.setSelectionFromTop(row, dp(60))
                 }
             }
         }
@@ -807,7 +833,7 @@ class ReaderActivity : Activity(), BookPageView.Host {
         } else {
             Library.setPosition(this, book.id, para)
         }
-        if (bookMode) showPara(para, 0) else list.setSelectionFromTop(para, dp(40))
+        if (bookMode) showPara(para, 0) else list.setSelectionFromTop(rowOf(para), dp(40))
         refresh()
     }
 
@@ -1402,13 +1428,17 @@ class ReaderActivity : Activity(), BookPageView.Host {
             SheetRow("🔖", "Bookmarks, notes & highlights") { action(2) },
             null,
             SheetRow("🗣", "Voice", "Choose the voice for this book") { action(4) },
+            SheetRow("🔁", "Keep listening", "When this book ends, start another one", Settings.autoNextBook(this)) {
+                Settings.setAutoNextBook(this, !Settings.autoNextBook(this))
+                toast(if (Settings.autoNextBook(this)) "When a book ends, the next one starts by itself" else "Stops at the end of a book (unless something is in Up next)")
+            },
             SheetRow("🌙", "Sleep timer", "Stop after a time or at the end of the chapter") { action(3) },
             SheetRow("⏸", "Natural pauses & chapter announcements", null, Settings.naturalPauses(this)) { action(19) },
             SheetRow("🔢", "Say numbers properly", "Chapter XII → Twelve, 1850s, \$4.50", Settings.speakNumbers(this)) { action(20) },
             SheetRow("✂", "Skip page numbers & clutter", null, Settings.skipClutter(this)) { action(7) },
             SheetRow("🧵", "Fix broken lines", "Join sentences a book split across lines, before reading", Settings.fixBrokenLines(this)) {
                 Settings.setFixBrokenLines(this, !Settings.fixBrokenLines(this))
-                cont = BooleanArray(paras.size) { i -> i > 0 && Settings.fixBrokenLines(this) && SpeechText.continues(paras[i - 1], paras[i]) }
+                cont = findBrokenLines(paras)
                 TtsService.instance?.applySettings(true)
                 curSection = -1; if (bookMode) showPara(curPara, 0) else adapter.notifyDataSetChanged()
                 toast(if (Settings.fixBrokenLines(this)) "Broken lines are joined into whole sentences" else "Lines are read as they are in the book")

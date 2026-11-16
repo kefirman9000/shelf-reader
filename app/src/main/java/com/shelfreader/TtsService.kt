@@ -63,6 +63,8 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
     private var title = ""
     private var author = ""
     var paras: List<String> = emptyList(); private set
+    /** Usual line length if this book has every printed line as its own paragraph, else 0. */
+    private var lineLen = 0
     var chapters: List<Chapter> = emptyList(); private set
     private var segs: List<Seg> = emptyList()
     private var headers: Set<String> = emptySet()
@@ -293,6 +295,7 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
         tts?.stop()
         neural?.stop()
         paras = d.paras
+        lineLen = SpeechText.lineLength(d.paras)
         chapters = d.chapters
         segs = Speech.segments(paras)
         headers = SpeechText.headerLines(paras, b.title, b.author)
@@ -547,7 +550,7 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
             var j = last + 1
             while (j < segs.size && segs[j].para != cur.para && clutter(segs[j].para)) j++
             if (j >= segs.size || segs[j].start != 0 || segs[j].para == cur.para) break
-            if (!SpeechText.continues(paras[cur.para], paras[segs[j].para])) break
+            if (!SpeechText.continues(paras[cur.para], paras[segs[j].para], lineLen)) break
             val more = sp.spoken(segText(j)) ?: break
             text = SpeechText.joinText(text, more)
             last = j
@@ -580,15 +583,24 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
         playing = false
         releaseWake()
         update()
-        // Up next: start the next book in the queue
+        // Up next: start the next book in the queue, or (with "Keep listening" on) another book from the library
         val q = Settings.queue(this).filter { it != id && Library.get(this, it) != null }
-        if (done && q.isNotEmpty()) {
-            val next = q.first()
-            Settings.setQueue(this, q.drop(1))
+        val next = if (!done || id == null) null else q.firstOrNull() ?: if (Settings.autoNextBook(this)) nextBookAfter(id) else null
+        if (next != null) {
+            if (q.firstOrNull() == next) Settings.setQueue(this, q.drop(1))
             val name = Library.get(this, next)?.title ?: ""
-            toast("Finished. Up next: $name")
-            main.postDelayed({ if (!playing && load(next)) play() }, 4000)
+            toast("Finished. Next: $name (pause to stop it)")
+            main.postDelayed({ if (!playing && load(next)) play() }, 5000)
         }
+    }
+
+    /** The book to play when one ends and Up next is empty: Want to read first, then a book you've started,
+     *  then the newest one you haven't. Finished books are skipped. */
+    private fun nextBookAfter(id: String): String? {
+        val all = Library.load(this).filter { it.id != id && Collections.FINISHED !in Collections.of(this, it.id) }
+        all.filter { Collections.WANT in Collections.of(this, it.id) }.maxByOrNull { it.added }?.let { return it.id }
+        all.filter { Library.percent(this, it) in 1..97 }.maxByOrNull { Library.opened(this, it.id) }?.let { return it.id }
+        return all.filter { Library.percent(this, it) == 0 }.maxByOrNull { it.added }?.id
     }
 
     private fun parse(id: String?): Pair<Int, Int>? {

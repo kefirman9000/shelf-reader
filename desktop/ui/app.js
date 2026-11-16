@@ -412,7 +412,7 @@ function renderReader() {
     const chapStarts = new Set(S.chapters.map((c) => c.para));
     const marks = noteMarks();
     $('#text').innerHTML = S.paras.map((p, i) =>
-      `${picturesHTML(i)}<p data-i="${i}"${chapStarts.has(i) ? ' class="chap"' : S.cont && S.cont[i] ? ' class="cont"' : ''}><button class="go" title="Read from here">▶</button>${marks[i] || ''}<span class="tx">${paraHTML(i)}</span></p>`).join('');
+      `${picturesHTML(i)}<p data-i="${i}"${paraClass(i, chapStarts)}><button class="go" title="Read from here">▶</button>${marks[i] || ''}<span class="tx">${paraHTML(i)}</span></p>`).join('');
     S.renderedFor = S.book.id; S.hlPara = -1;
   }
   highlight(true);
@@ -756,10 +756,19 @@ function speakNext(token) {
   else audioSpeak(token, vid, items.map((x) => x.t).join(' '));
 }
 const natural = () => S.settings.naturalPauses !== false;
+/** Classes for paragraph i: a chapter start, or part of a sentence the book broke across lines (shown as one paragraph). */
+function paraClass(i, chapStarts) {
+  if (chapStarts.has(i)) return ' class="chap"';
+  const c = [];
+  if (S.cont && S.cont[i]) c.push('cont');
+  if (S.cont && S.cont[i + 1]) c.push('runs');
+  return c.length ? ` class="${c.join(' ')}"` : '';
+}
 /** S.cont[i]: paragraph i is the rest of a sentence the book broke off at the end of paragraph i-1. */
 function computeCont() {
   const on = S.settings.fixBrokenLines !== false;
-  S.cont = S.paras.map((p, i) => on && i > 0 && SpeechText.continues(S.paras[i - 1], p));
+  S.lineLen = on ? SpeechText.lineLength(S.paras) : 0;
+  S.cont = S.paras.map((p, i) => on && i > 0 && SpeechText.continues(S.paras[i - 1], p, S.lineLen));
 }
 const isClutterPara = (pi) => S.settings.skipClutter !== false && (S.skipParas?.has(pi) || S.headers?.has(S.paras[pi]) || SpeechText.isPageNumber(S.paras[pi]));
 /** What to say for a sentence, split into pieces with the pause after each (see speechtext.js). */
@@ -782,7 +791,7 @@ function segItems(i) {
       let j = last + 1;
       while (j < S.segs.length && S.segs[j][0] !== cur[0] && isClutterPara(S.segs[j][0])) j++;
       if (j >= S.segs.length || S.segs[j][1] !== 0 || S.segs[j][0] === cur[0]) break;
-      if (!SpeechText.continues(S.paras[cur[0]], S.paras[S.segs[j][0]])) break;
+      if (!SpeechText.continues(S.paras[cur[0]], S.paras[S.segs[j][0]], S.lineLen || 0)) break;
       const more = spoken(S.paras[S.segs[j][0]].slice(S.segs[j][1], S.segs[j][2]), S.segs[j][0]);
       if (!more) break;
       t = SpeechText.joinText(t, more); last = j;
@@ -910,14 +919,25 @@ async function finished() {
   await saveState({ collections: [...cols] });
   api('/api/stats/finished', { method: 'POST', json: { id: S.book.id, title: S.book.title, author: S.book.author } }).catch(() => {});
   toast(`Finished “${S.book.title}” 🎉`);
+  // Up next first; with "Keep listening" on, another book from the library
   const q = (S.settings.queue || []).filter((id) => id !== S.book.id && bookById(id));
-  if (q.length) {
-    const next = bookById(q[0]);
-    await saveSettings({ queue: q.slice(1) });
+  const next = q.length ? bookById(q[0]) : S.settings.autoNextBook ? nextBookAfter(S.book.id) : null;
+  if (next) {
+    if (q.length) await saveSettings({ queue: q.slice(1) });
     let cancelled = false;
-    toastAction(`Finished “${S.book.title}”. Up next: “${next.title}”…`, 'Cancel', () => { cancelled = true; }, 6000);
+    toastAction(`Finished “${S.book.title}”. Next: “${next.title}”…`, 'Cancel', () => { cancelled = true; }, 6000);
     setTimeout(async () => { if (cancelled || S.playing) return; await loadBook(next.id); if (S.view === 'reader') renderReader(); play(); }, 6000);
   }
+}
+
+/** The book to play when one ends and Up next is empty: Want to read first, then a book you've started,
+ *  then the newest one you haven't. Finished books are skipped. */
+function nextBookAfter(id) {
+  const all = (S.books || []).filter((b) => b.id !== id && !(b.collections || []).includes('Finished'));
+  const newest = (list, key) => list.sort((a, b) => key(b) - key(a))[0] || null;
+  return newest(all.filter((b) => (b.collections || []).includes('Want to read')), (b) => b.added || 0)
+    || newest(all.filter((b) => b.percent > 0 && b.percent < 98), (b) => b.opened || 0)
+    || newest(all.filter((b) => !b.percent), (b) => b.added || 0);
 }
 
 // ---------- Up next ----------
@@ -1239,6 +1259,7 @@ function openSettings() {
     <h3>Reading aloud</h3>
     <div class="setrow"><button id="sVoices" class="primary">Voice options: natural &amp; premium voices…</button></div>
     <label class="check"><input type="checkbox" id="sClutter" ${s.skipClutter !== false ? 'checked' : ''}> Skip page numbers, running headers, footnote markers, links and scan notices</label>
+    <label class="check"><input type="checkbox" id="sAutoNext" ${s.autoNextBook ? 'checked' : ''}> Keep listening: when a book ends, start another (Up next first, then Want to read, then books you've started)</label>
     <label class="check"><input type="checkbox" id="sFixLines" ${s.fixBrokenLines !== false ? 'checked' : ''}> Fix broken lines: join sentences a book split across lines (scanned books and PDFs) before reading them aloud</label>
     <label class="check"><input type="checkbox" id="sNatural" ${s.naturalPauses !== false ? 'checked' : ''}> Natural pauses: by punctuation, longer between paragraphs and chapters, and chapter headings announced like an audiobook</label>
     <label class="check"><input type="checkbox" id="sNumbers" ${s.speakNumbers !== false ? 'checked' : ''}> Say numbers properly: “Chapter XII” → “Chapter Twelve”, Henry VIII, 1850s, $4.50, 3:30 pm, Dr. and St.</label>
@@ -1267,6 +1288,7 @@ function openSettings() {
   $('#sSize').oninput = (e) => { $('#text').style.fontSize = e.target.value + 'px'; $('#sSizeVal').textContent = e.target.value; };
   $('#sSize').onchange = (e) => saveSettings({ textSize: +e.target.value });
   $('#sClutter').onchange = (e) => saveSettings({ skipClutter: e.target.checked }).then(() => { if (S.playing) speakFrom(S.segIdx); });
+  $('#sAutoNext').onchange = (e) => saveSettings({ autoNextBook: e.target.checked });
   $('#sFixLines').onchange = (e) => saveSettings({ fixBrokenLines: e.target.checked }).then(() => { computeCont(); if (S.view === 'reader') renderReader(); if (S.playing) speakFrom(S.segIdx); });
   $('#sNatural').onchange = (e) => saveSettings({ naturalPauses: e.target.checked }).then(() => { if (S.playing) speakFrom(S.segIdx); });
   $('#sNumbers').onchange = (e) => saveSettings({ speakNumbers: e.target.checked }).then(() => { if (S.playing) speakFrom(S.segIdx); });

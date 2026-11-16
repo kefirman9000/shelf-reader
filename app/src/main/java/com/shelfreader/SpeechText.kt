@@ -307,15 +307,46 @@ object SpeechText {
 
     // ---------- lines broken in the middle of a sentence ----------
     private val ENDS_SENTENCE = Regex("[.!?…:;\"”’»)\\]]\\s*$")
-    /** Does paragraph [next] carry on the sentence of [prev]? (Books made from scans often break every line.) */
-    fun continues(prev: String, next: String): Boolean {
+    private const val OPENERS = "“\"‘'(["
+    /** First letter or digit of [b], after any opening quotes or brackets. */
+    private fun firstChar(b: String): Char? = b.trimStart().trimStart(*OPENERS.toCharArray()).firstOrNull()
+
+    /**
+     * For books where every printed line became its own paragraph (scans, PDFs, converted text): the usual
+     * length of a full line. 0 for ordinary books, where only the stricter rules in [continues] apply.
+     */
+    fun lineLength(paras: List<String>): Int {
+        if (paras.size < 30) return 0
+        var pairs = 0; var open = 0; var lower = 0
+        for (i in 1 until paras.size) {
+            val a = paras[i - 1].trimEnd()
+            if (a.length < 20) continue
+            pairs++
+            if (!ENDS_SENTENCE.containsMatchIn(a)) { open++; if (firstChar(paras[i])?.isLowerCase() == true) lower++ }
+        }
+        // lots of lines stop mid-sentence, and many of them carry on in lower case: a line-broken book
+        if (pairs < 20 || open < pairs * 0.25 || lower < pairs * 0.08) return 0
+        val lens = paras.map { it.trim().length }.filter { it >= 20 }.sorted()
+        return if (lens.isEmpty()) 0 else lens[lens.size / 2]
+    }
+
+    /**
+     * Does paragraph [next] carry on the sentence of [prev]? (Books made from scans often break every line.)
+     * [lineLen] from [lineLength]: in line-broken books a full-length line that stops mid-sentence always carries
+     * on, even into a capital ("Mr. Darcy", "I"), a number or a quote.
+     */
+    fun continues(prev: String, next: String, lineLen: Int = 0): Boolean {
         val a = prev.trimEnd(); val b = next.trimStart()
         if (a.isEmpty() || b.isEmpty()) return false
         if (ENDS_SENTENCE.containsMatchIn(a)) return false
         if (HEAD_RE.matches(a) || HEAD_RE.matches(b)) return false
         if (a.length < 60 && a == a.uppercase() && a.any { it.isLetter() }) return false
-        val c = b[0]
-        return c.isLowerCase() || (c.isLetterOrDigit() && Regex("[,—–-]$").containsMatchIn(a))
+        val f = firstChar(b) ?: return false
+        if (f.isLowerCase()) return true
+        // after a comma or dash the sentence goes on, even into a name or a quote
+        if (Regex("[,—–-]$").containsMatchIn(a) && f.isLetterOrDigit()) return true
+        if (lineLen > 0 && a.length >= lineLen * 0.7 && a.last().isLetterOrDigit() && f.isLetterOrDigit()) return true
+        return false
     }
     /** Joins two pieces of one sentence, mending words split with a hyphen at the line end. */
     fun joinText(a: String, b: String): String {

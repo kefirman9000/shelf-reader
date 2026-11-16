@@ -483,6 +483,7 @@ class MainActivity : Activity() {
         add(settingRow("🎧", "Resume with headphones", "Continue a paused book when headphones connect", Settings.resumeOnHeadphones(this)) { Settings.setResumeOnHeadphones(this, it?.isChecked == true) })
         add(settingRow("⚙", "Android text-to-speech settings", "Speech engine, language packs and default rate") { openTtsSettingsScreen() })
         add(sectionTitle("Your books"))
+        add(settingRow("🔁", "Keep listening", "When a book ends, start another: Up next first, then Want to read, then books you've started", Settings.autoNextBook(this)) { Settings.setAutoNextBook(this, it?.isChecked == true) })
         add(settingRow("⏭", "Up next", "Books that play one after another (${Settings.queue(this).size})") { showQueue() })
         add(settingRow("🔎", "Search inside your books", "Find a word or phrase in every book and listen from there") { searchBooks() })
         add(settingRow("📊", "Reading stats", "Daily goal, streak and finished books") { showStats(this) })

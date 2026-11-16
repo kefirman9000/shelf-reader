@@ -305,6 +305,9 @@ object Settings {
     fun setCompactPlayer(ctx: Context, v: Boolean) = p(ctx).edit().putBoolean("compactPlayer", v).apply()
     fun fixBrokenLines(ctx: Context) = p(ctx).getBoolean("fixBrokenLines", true)
     fun setFixBrokenLines(ctx: Context, v: Boolean) = p(ctx).edit().putBoolean("fixBrokenLines", v).apply()
+    /** When a book ends, start another one by itself (Up next first, then Want to read, then others). */
+    fun autoNextBook(ctx: Context) = p(ctx).getBoolean("autoNextBook", false)
+    fun setAutoNextBook(ctx: Context, v: Boolean) = p(ctx).edit().putBoolean("autoNextBook", v).apply()
     fun naturalPauses(ctx: Context) = p(ctx).getBoolean("naturalPauses", true)
     fun setNaturalPauses(ctx: Context, v: Boolean) = p(ctx).edit().putBoolean("naturalPauses", v).apply()
     fun speakNumbers(ctx: Context) = p(ctx).getBoolean("speakNumbers", true)

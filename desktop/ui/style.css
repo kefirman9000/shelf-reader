@@ -239,8 +239,11 @@ a.fn { color: var(--accent); cursor: pointer; text-decoration: none; font-size: 
 #toast .link { background: none; border: none; color: var(--accent2, #56b394); font-weight: 600; cursor: pointer; padding: 0 0 0 8px; }
 
 /* lines a book broke mid-sentence flow on as one paragraph */
-p.cont { margin-top: -0.55em !important; text-indent: 0 !important; }
-#pages p.cont { margin-top: 0 !important; }
+/* lines a book broke mid-sentence flow on as one paragraph */
+p.runs, p.cont { display: inline; }
+p.cont { text-indent: 0 !important; }
+p.cont::before { content: " "; }
+p.cont > .go { display: none; }
 
 /* ===== modern look (matches the phone app) ===== */
 body.theme-0 { --bg:#121212; --panel:#1c1c1e; --panel2:#2a2a2d; --line:#34343a; --fg:#ededed; --muted:#9a9aa0; --accent:#2e6e5a; --accent2:#56b394; }
