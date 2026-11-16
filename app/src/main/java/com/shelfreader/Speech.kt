@@ -71,10 +71,9 @@ object Speech {
 }
 
 /** Turns book text into what the voice should actually say. */
-class Speaker(ctx: Context) {
-    private val skipClutter = Settings.skipClutter(ctx)
-    private val speakNumbers = Settings.speakNumbers(ctx)
-    private val rules: List<Pair<Regex, String>> = Settings.fixes(ctx).filter { it.from.isNotBlank() }.map {
+class Speaker(private val skipClutter: Boolean, private val speakNumbers: Boolean, fixes: List<Fix>) {
+    constructor(ctx: Context) : this(Settings.skipClutter(ctx), Settings.speakNumbers(ctx), Settings.fixes(ctx))
+    private val rules: List<Pair<Regex, String>> = fixes.filter { it.from.isNotBlank() }.map {
         Regex("(?<![\\p{L}\\p{N}])" + Regex.escape(it.from) + "(?![\\p{L}\\p{N}])", RegexOption.IGNORE_CASE) to it.to
     }
 
@@ -93,7 +92,8 @@ class Speaker(ctx: Context) {
 
     /** Returns the text to speak, or null if this piece should be skipped. */
     fun spoken(text: String): String? {
-        var t = text
+        var t = SpeechText.clean(text)
+        if (!SpeechText.hasWords(t)) return null   // "* * *", "———", stray symbols: nothing to say (some voices then never answer)
         if (skipClutter) {
             if (boilerplate.containsMatchIn(t)) return null
             if (t.trimStart().startsWith("[Footnote", ignoreCase = true)) return null
@@ -107,6 +107,7 @@ class Speaker(ctx: Context) {
         }
         for ((re, to) in rules) t = re.replace(t, Regex.escapeReplacement(to))
         if (speakNumbers) t = SpeechText.normalize(t)
-        return t.trim().ifEmpty { null }
+        t = SpeechText.clean(t)
+        return if (SpeechText.hasWords(t)) t else null
     }
 }

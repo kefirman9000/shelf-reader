@@ -331,7 +331,8 @@ function buildFixRules() {
   fixRules = (S.settings.fixes || []).filter((f) => f.from).map((f) => [new RegExp('(?<![\\p{L}\\p{N}])' + f.from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?![\\p{L}\\p{N}])', 'giu'), f.to || '']);
 }
 function spoken(text, pi) {
-  let t = text;
+  let t = SpeechText.clean(text);
+  if (!SpeechText.hasWords(t)) return null;   // "* * *", "———": nothing to say (some voices then never answer)
   if (S.settings.skipClutter !== false) {
     if (pi != null && (S.skipParas?.has(pi) || S.headers?.has(S.paras[pi]) || SpeechText.isPageNumber(S.paras[pi]))) return null;
     if (RE_BOILER.test(t)) return null;
@@ -799,8 +800,19 @@ function segItems(i) {
     }
   }
   S.segLastFor[i] = last;
-  if (!natural()) return [{ t, gap: 0 }];
-  return engineOf(currentVoiceName()) === 'browser' ? SpeechText.pieces(t) : [{ t, gap: SpeechText.endPause(t) }];
+  const browser = engineOf(currentVoiceName()) === 'browser';
+  const raw = !natural() ? [{ t, gap: 0 }] : browser ? SpeechText.pieces(t) : [{ t, gap: SpeechText.endPause(t) }];
+  return safeItems(raw, browser ? 200 : 900);
+}
+/** Pieces no voice will choke on: cleaned, nothing without words, none too long. (Browser voices can silently stop
+ *  on long text and never say they finished, so theirs are kept short.) Null when nothing is left to say. */
+function safeItems(items, max) {
+  const out = [];
+  for (const it of items || []) {
+    const parts = SpeechText.chunks(SpeechText.clean(it.t), max);
+    parts.forEach((t, j) => out.push({ t, gap: j === parts.length - 1 ? it.gap : 120 }));
+  }
+  return out.length ? out : null;
 }
 /** How long to wait after a sentence: by its punctuation, plus more at paragraph and chapter ends. */
 function gapAfter(k) {
@@ -820,6 +832,7 @@ const paceFor = (pi) => (natural() ? 1 + (((pi * 7919) % 41) - 20) / 1000 : 1);
 /** Called when a sentence finishes, whatever voice engine read it. */
 function segDone(token) {
   if (token !== S.token) return;
+  S.stalls = 0;
   const wait = gapAfter(S.segIdx);
   if (wait > 0) setTimeout(() => segAdvance(token), wait); else segAdvance(token);
 }
@@ -835,6 +848,7 @@ function segAdvance(token) {
 }
 function speechFailed(token, message) {
   S.speechErrors = (S.speechErrors || 0) + 1;
+  note(`voice error #${S.speechErrors} at sentence ${S.segIdx + 1}${message ? ': ' + message : ''}`);
   if (S.speechErrors >= 3) {
     pause();
     toast((message ? message + ' ' : 'This voice isn’t working. ') + 'Try another voice from the menu at the bottom right.', 9000);
@@ -848,9 +862,11 @@ function browserSpeak(token, items, k) {
   const v = S.voices.find((x) => x.name === currentVoiceName());
   if (v) { u.voice = v; u.lang = v.lang; }
   u.rate = currentRate() * paceFor(S.segs[S.segIdx][0]);
-  u.onstart = () => { S.speechErrors = 0; };
+  const allow = () => items[k].t.length * 85 / Math.max(0.3, u.rate) + 10000;
+  u.onstart = () => { S.speechErrors = 0; watch(allow()); };
   u.onend = () => {
     if (token !== S.token) return;
+    watch(allow() + 3000);
     if (k + 1 < items.length) {
       const wait = SpeechText.vary(Math.max(0, items[k].gap / currentRate() - 140));
       setTimeout(() => { if (token === S.token && S.playing) browserSpeak(token, items, k + 1); }, wait);
@@ -862,6 +878,7 @@ function browserSpeak(token, items, k) {
   };
   S.utter = u; // keep a reference so the browser doesn't drop the callbacks
   if (k === 0) afterMove();
+  watch(allow() + 5000);
   speechSynthesis.speak(u);
 }
 
@@ -881,9 +898,21 @@ async function audioSpeak(token, vid, text) {
   let j = i + 1; let n = 0;
   while (j < S.segs.length && n < 2) { const t = segSpoken(j); if (t) { audioFor(j, vid, rate, t); n++; } j++; }
   for (const key of [...AUD.cache.keys()]) { const idx = +key.split('|')[0]; if (idx < i || idx > j) AUD.cache.delete(key); }
-  if (!engineReady(vid)) { S.loadingVoice = true; updatePlayer(); }
+  const loading = !engineReady(vid);
+  if (loading) { S.loadingVoice = true; updatePlayer(); }
+  // making the audio may not take forever: a first-time voice download gets 10 minutes, otherwise 90 seconds
+  const limit = loading ? 600000 : 90000;
+  watch(limit + 5000);
   let r;
-  try { r = await p; } catch (e) {
+  try {
+    r = await Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), limit))]);
+  } catch (e) {
+    if (e.message === 'timeout') {
+      AUD.cache.delete(`${i}|${vid}|${rate}`);
+      note(`voice took too long to make sentence ${i + 1} (${vid})`);
+      if (token === S.token) { S.loadingVoice = false; updatePlayer(); speechFailed(token, 'The voice took too long.'); }
+      return;
+    }
     S.loadingVoice = false; updatePlayer();
     if (token !== S.token || e.message === 'dropped') return;
     speechFailed(token, e.message.length < 160 ? e.message + '.' : '');
@@ -896,6 +925,8 @@ async function audioSpeak(token, vid, text) {
   const a = AUD.el;
   a.src = url; a.preservesPitch = true; a.playbackRate = Math.max(0.25, Math.min(4, r.extra || 1));
   a.onended = () => { URL.revokeObjectURL(url); segDone(token); };
+  a.onloadedmetadata = () => { if (token === S.token && isFinite(a.duration)) watch(a.duration / a.playbackRate * 1000 + 10000); };
+  watch(text.length * 85 / Math.max(0.3, rate) + 15000);
   a.onerror = () => { URL.revokeObjectURL(url); if (token === S.token) speechFailed(token); };
   updatePlayer();
   a.play().catch((err) => { if (token === S.token) { pause(); toast('Couldn’t play audio: ' + err.message, 6000); } });
@@ -1257,7 +1288,7 @@ function openSettings() {
     <div class="setrow"><label>Night mode</label>from <input type="time" id="sNightFrom" value="${esc((s.night && s.night.from) || '21:00')}"> to <input type="time" id="sNightTo" value="${esc((s.night && s.night.to) || '07:00')}">
       <select id="sNightTheme">${opt(['Dark', 'Light', 'Sepia', 'Black'], (s.night && s.night.theme) ?? 3)}</select></div>
     <h3>Reading aloud</h3>
-    <div class="setrow"><button id="sVoices" class="primary">Voice options: natural &amp; premium voices…</button></div>
+    <div class="setrow"><button id="sVoices" class="primary">Voice options: natural &amp; premium voices…</button> <button id="sReport">🐞 Report a problem</button></div>
     <label class="check"><input type="checkbox" id="sClutter" ${s.skipClutter !== false ? 'checked' : ''}> Skip page numbers, running headers, footnote markers, links and scan notices</label>
     <label class="check"><input type="checkbox" id="sAutoNext" ${s.autoNextBook ? 'checked' : ''}> Keep listening: when a book ends, start another (Up next first, then Want to read, then books you've started)</label>
     <label class="check"><input type="checkbox" id="sFixLines" ${s.fixBrokenLines !== false ? 'checked' : ''}> Fix broken lines: join sentences a book split across lines (scanned books and PDFs) before reading them aloud</label>
@@ -1301,6 +1332,7 @@ function openSettings() {
   }));
   $('#sRestore').onclick = () => $('#restoreInput').click();
   $('#sVoices').onclick = () => openVoiceOptions();
+  $('#sReport').onclick = () => reportProblem();
   $('#sUpdate').onclick = checkUpdates;
   renderUpdateBox();
 }
@@ -1509,3 +1541,79 @@ document.addEventListener('keydown', (e) => {
   const obs = new MutationObserver(() => { box.hidden = $('#results').children.length > 0; });
   obs.observe($('#results'), { childList: true });
 })();
+
+
+// ---------- stall watchdog ----------
+// Reading moves on only when the voice says a sentence finished. If it never does (a voice silently dropping
+// text, an audio element that stalls, a stuck generator), the watchdog notices and carries on.
+function watch(ms) { S.wdAt = Date.now(); S.wdMs = ms; }
+setInterval(() => {
+  if (!S.playing || !S.wdAt || Date.now() - S.wdAt <= S.wdMs) return;
+  S.stalls = (S.stalls || 0) + 1; S.stallsTotal = (S.stallsTotal || 0) + 1;
+  const at = S.segIdx;
+  const txt = S.segs[at] ? S.paras[S.segs[at][0]].slice(S.segs[at][1], S.segs[at][2]) : '';
+  note(`STALL #${S.stalls} at sentence ${at + 1} (no word from the voice for ${Math.round(S.wdMs / 1000)}s): "${txt.slice(0, 160)}"`);
+  S.wdAt = 0;
+  S.token++; const tok = S.token;
+  try { speechSynthesis.cancel(); } catch (_) {}
+  AUD.el.onended = null; AUD.el.onerror = null; AUD.el.pause(); AUD.cache.clear();
+  if (S.stalls >= 3) { pause(); toast('Reading keeps getting stuck here. Try another voice, or use Settings → Report a problem so it can be fixed.', 10000); return; }
+  if (S.stalls >= 2) S.segIdx = ((S.segLastFor || {})[at] ?? at) + 1;   // still stuck: skip it
+  if (S.segIdx >= S.segs.length) { finished(); return; }
+  afterMove(); speakNext(tok);
+}, 2000);
+
+// ---------- event log, crash log and "Report a problem" ----------
+const EVENTS = (() => { try { return JSON.parse(localStorage.getItem('events') || '[]'); } catch (_) { return []; } })();
+function note(msg) {
+  EVENTS.push(new Date().toTimeString().slice(0, 8) + ' ' + String(msg).slice(0, 300));
+  while (EVENTS.length > 60) EVENTS.shift();
+  try { localStorage.setItem('events', JSON.stringify(EVENTS)); } catch (_) {}
+  console.info('[ShelfReader]', msg);
+}
+window.addEventListener('error', (e) => note(`ERROR ${e.message} at ${(e.filename || '').split('/').pop()}:${e.lineno}`));
+window.addEventListener('unhandledrejection', (e) => note(`ERROR (promise) ${e.reason && (e.reason.stack || e.reason.message) || e.reason}`.slice(0, 600)));
+
+function visibleChars(s) {
+  return String(s).replace(/[\u0000-\u001F\u007F-\u009F\u00AD\u200B-\u200F\u2060\uFEFF\uFFFD\uE000-\uF8FF]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g,
+    (c) => '<U+' + c.charCodeAt(0).toString(16).toUpperCase().padStart(4, '0') + '>');
+}
+async function problemReport(what) {
+  const info = await fetch('/api/info').then((r) => r.json()).catch(() => ({}));
+  const crash = await fetch('/api/crashlog').then((r) => r.ok ? r.text() : '').catch(() => '');
+  const L = [];
+  L.push(`Shelf Reader ${info.version || ''} (Windows app) · ${navigator.userAgent.match(/Windows NT [\d.]+|Mac OS X [\d_]+|Linux/)?.[0] || ''}`, '');
+  L.push('What happened: ' + (what || '(not described)'), '');
+  if (S.book) {
+    L.push(`Book: ${S.book.title} (${S.book.id})`);
+    L.push(`Sentence ${S.segIdx + 1} of ${S.segs.length}, playing: ${!!S.playing}, loading voice: ${!!S.loadingVoice}`);
+    L.push(`Voice: ${currentVoiceName() || 'default'} (${engineOf(currentVoiceName())}) · speed ${currentRate()}`);
+    L.push(`Stalls: ${S.stalls || 0} now, ${S.stallsTotal || 0} this session · voice errors in a row: ${S.speechErrors || 0}`);
+    for (let d = -1; d <= 2; d++) {
+      const k = S.segIdx + d; const sg = S.segs[k]; if (!sg) continue;
+      const raw = S.paras[sg[0]].slice(sg[1], sg[2]);
+      let said; try { said = (segItems(k) || []).map((x) => x.t).join(' | '); } catch (e) { said = 'ERROR ' + e.message; }
+      L.push(`${d === 0 ? '▶' : ' '} [${k + 1}] book: "${visibleChars(raw.slice(0, 400))}"`);
+      L.push(`        said: ${said ? '"' + visibleChars(said.slice(0, 400)) + '"' : '(skipped)'}`);
+    }
+  }
+  const st = S.settings || {};
+  L.push('', `Settings: natural pauses ${st.naturalPauses !== false}, say numbers ${st.speakNumbers !== false}, fix broken lines ${st.fixBrokenLines !== false}, skip clutter ${st.skipClutter !== false}`);
+  L.push('', 'Recent events:', EVENTS.join('\n') || '(none)');
+  if (crash) L.push('', 'Crash log:', crash.slice(-6000));
+  return L.join('\n');
+}
+async function reportProblem() {
+  const what = () => ($('#rpWhat') || {}).value || '';
+  modal(`<h2>Report a problem</h2>
+    <p class="muted">Makes a report with the book's name, the sentence it's on, the voice and settings, and what the app did recently. Nothing is sent anywhere: you save or copy it and send it yourself.</p>
+    <textarea id="rpWhat" rows="3" style="width:100%" placeholder="What went wrong? (e.g. it stopped reading here)"></textarea>`, [
+    ['Cancel'],
+    ['Copy', async () => { await navigator.clipboard.writeText(await problemReport(what())); toast('Report copied'); }],
+    ['Save report…', async () => {
+      const blob = new Blob([await problemReport(what())], { type: 'text/plain' });
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+      a.download = 'ShelfReader-report-' + new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-') + '.txt'; a.click();
+      toast('Report saved to your Downloads folder');
+    }, true]]);
+}

@@ -84,7 +84,7 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
     private fun neuralSpeaker(): NeuralSpeaker = neural ?: NeuralSpeaker(this,
         onStart = { id -> progressListener.onStart(id) },
         onDone = { id -> progressListener.onDone(id) },
-        onError = { id, msg -> toast("The natural voice had a problem: $msg"); @Suppress("DEPRECATION") progressListener.onError(id) }
+        onError = { id, msg -> CrashReport.note(this, "natural voice error on $id: $msg"); lastVoiceError = msg; @Suppress("DEPRECATION") progressListener.onError(id) }
     ).also { neural = it }
     private var ready = false
     private var speaker: Speaker? = null
@@ -92,6 +92,75 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
     private var queuedUpTo = -1
     private var segStartedAt = 0L
     private var lastSpoken = -1
+
+    // ---------- stall watchdog ----------
+    // Reading moves on only when the voice says a sentence started or finished. If a voice silently drops one
+    // (odd characters, an engine hiccup, a lost connection), nothing would happen ever again. The watchdog notices.
+    private var lastActivity = 0L
+    private var expectMs = 15_000L
+    private var stalls = 0
+    private var stallsTotal = 0
+    private var errorsInRow = 0
+    private var lastVoiceError: String? = null
+    private var rebuilt = false
+    private fun kick(expect: Long) { lastActivity = SystemClock.elapsedRealtime(); expectMs = expect }
+    /** How long a piece of text may take before it counts as stuck: generous, so slow voices and phones aren't cut off. */
+    private fun allowFor(text: String?): Long {
+        val rate = Settings.rateFor(this, bookId).coerceAtLeast(0.3f)
+        val speak = ((text?.length ?: 200) * 85L / rate).toLong()
+        return speak + (if (neuralVoice() != null) 30_000L else 10_000L)
+    }
+    private val watchdog = object : Runnable {
+        override fun run() {
+            main.postDelayed(this, 3000)
+            if (!playing || !ready || segs.isEmpty() || lastActivity == 0L) return
+            if (SystemClock.elapsedRealtime() - lastActivity <= expectMs) return
+            stalls++; stallsTotal++
+            val at = segIndex
+            CrashReport.note(this@TtsService, "STALL #$stalls at sentence $at (no word from the voice for ${expectMs / 1000}s): \"${currentSegText()?.take(160)}\"")
+            when {
+                stalls >= 3 -> {
+                    pause()
+                    toast("Reading keeps getting stuck here. Try another voice, or use ⋮ → Report a problem so it can be fixed.")
+                }
+                stalls == 1 -> speakFrom(at)                       // a hiccup: try the same sentence again
+                at + 1 < segs.size -> speakFrom(at + 1)            // still stuck: skip it
+                else -> finished()
+            }
+        }
+    }
+
+    /** What the player is doing right now (for problem reports). */
+    fun diagnostics(): String {
+        val v = Settings.voiceFor(this, bookId)
+        val sb = StringBuilder()
+        sb.append("Book: $title (${bookId ?: "-"})\n")
+        sb.append("Sentence ${segIndex + 1} of ${segs.size}, paragraph ${segs.getOrNull(segIndex)?.para}, chapter: ${chapterTitle() ?: "-"}\n")
+        sb.append("Playing: $playing, voice ready: $ready, queued up to ${queuedUpTo + 1}, last queued ${lastSpoken + 1}\n")
+        sb.append("Voice: ${NeuralVoices.label(v) ?: v ?: "phone default"} · engine ${tts?.defaultEngine ?: "-"} · speed ${Settings.rateFor(this, bookId)}\n")
+        sb.append("Stalls ${stalls}, errors in a row ${errorsInRow}, last voice error: ${lastVoiceError ?: "-"}\n")
+        for (d in -1..2) {
+            val k = segIndex + d
+            if (k < 0 || k >= segs.size) continue
+            val raw = segText(k)
+            val said = try { (speaker ?: Speaker(this)).spoken(raw) } catch (e: Throwable) { "ERROR ${e.message}" }
+            sb.append(if (d == 0) "▶ " else "  ").append("[${k + 1}] book: \"").append(visible(raw.take(400))).append("\"\n")
+            sb.append("        said: ").append(said?.let { "\"" + visible(it.take(400)) + "\"" } ?: "(skipped)").append("\n")
+        }
+        return sb.toString()
+    }
+    /** Shows hidden characters as <U+200B> so they can be spotted in a report. */
+    private fun visible(s: String) = buildString {
+        var i = 0
+        while (i < s.length) {
+            val c = s[i]
+            if (Character.isHighSurrogate(c) && i + 1 < s.length && Character.isLowSurrogate(s[i + 1])) { append(c).append(s[i + 1]); i += 2; continue }
+            val odd = c.code < 32 || c.code in 0x7F..0x9F || c.code in 0x200B..0x200F || c.code == 0xFEFF || c.code == 0xAD ||
+                c.code == 0xFFFD || c.code in 0xE000..0xF8FF || Character.isSurrogate(c)
+            if (odd) append("<U+%04X>".format(c.code)) else append(c)
+            i++
+        }
+    }
     private var foreground = false
     private var lastNotifKey = ""
     private var warnedVoice: String? = null
@@ -170,6 +239,7 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
         CrashReport.install(this)
         instance = this
         main.postDelayed(statsTick, 30_000)
+        main.postDelayed(watchdog, 3000)
         audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         getSystemService(NotificationManager::class.java)
             .createNotificationChannel(NotificationChannel(CHANNEL, "Reading aloud", NotificationManager.IMPORTANCE_LOW))
@@ -442,6 +512,9 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
         update()
     }
 
+    /** For the self-test: (sentence, sentences, stalls). */
+    fun testState() = Triple(segIndex, segs.size, stalls)
+    fun testStallsTotal() = stallsTotal
     fun currentSegText(): String? = segs.getOrNull(segIndex)?.let { paras[it.para].substring(it.start, it.end) }
 
     fun chapterTitle(): String? = chapterIndexOf(index).let { if (it >= 0) chapters[it].title else null }
@@ -486,6 +559,7 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
         segIndex = si.coerceIn(0, maxOf(0, segs.size - 1))
         queuedUpTo = segIndex - 1
         lastSpoken = -1
+        kick(if (neuralVoice() != null) 90_000L else 20_000L)   // first sentence: allow for a voice still loading
         fill(true)
     }
 
@@ -507,11 +581,24 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
             queuedUpTo = lastK
             val pace = if (natural) SpeechText.paceFor(segs[k].para) else 1f
             if (natural && ns == null) t.setSpeechRate(rate * pace)
-            for ((j, it) in items.withIndex()) {
-                val last = j == items.size - 1
+            val safe = safePieces(items)
+            if (safe.isEmpty()) {
+                // nothing sayable after cleaning: a short silence still reports back, so reading moves on
+                val id = "$gen:$lastK:e"
+                if (ns != null) ns.silence(150, id) else t.playSilentUtterance(150, mode, id)
+                mode = TextToSpeech.QUEUE_ADD
+                lastSpoken = lastK; spoke = true
+                continue
+            }
+            for ((j, it) in safe.withIndex()) {
+                val last = j == safe.size - 1
                 val id = if (last) "$gen:$lastK:e" else "$gen:$k:$j"
                 if (ns != null) ns.speak(it.text, mode == TextToSpeech.QUEUE_FLUSH, id, rate * pace)
-                else t.speak(it.text, mode, null, id)
+                else if (t.speak(it.text, mode, null, id) == TextToSpeech.ERROR) {
+                    // refused outright: no callback will ever come for it, so treat it as an error now
+                    CrashReport.note(this, "voice refused sentence ${k + 1} (${it.text.length} chars): \"${it.text.take(120)}\"")
+                    if (last) main.post { @Suppress("DEPRECATION") progressListener.onError(id) }
+                }
                 mode = TextToSpeech.QUEUE_ADD
                 val gap = if (natural) gapAfter(lastK, it.gapMs, last) else 0
                 if (gap > 30) {
@@ -524,6 +611,17 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
         }
         if (natural && nv == null) t.setSpeechRate(rate)
         if (first && !spoke) finished()
+    }
+
+    /** Pieces no voice will choke on: cleaned, nothing without words, none longer than a voice safely takes. */
+    private fun safePieces(items: List<SpeechText.Piece>): List<SpeechText.Piece> {
+        val max = minOf(900, TextToSpeech.getMaxSpeechInputLength() - 100)
+        val out = ArrayList<SpeechText.Piece>()
+        for (p in items) {
+            val parts = SpeechText.chunks(SpeechText.clean(p.text), max)
+            for ((i, c) in parts.withIndex()) out += SpeechText.Piece(c, if (i == parts.size - 1) p.gapMs else 120)
+        }
+        return out
     }
 
     /** What to say for sentence [k]: chapter headings announced like an audiobook, clause pieces with pauses. */
@@ -618,6 +716,8 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
             main.post {
                 val (g, k) = parse(utteranceId) ?: return@post
                 if (g != gen) return@post
+                errorsInRow = 0
+                kick(allowFor(segs.getOrNull(k)?.let { segText(k) }) + (if (utteranceId?.contains(":p") == true) 5000 else 0))
                 if (segIndex != k || utteranceId?.endsWith(":0") == true) segStartedAt = SystemClock.elapsedRealtime()
                 segIndex = k
                 savePos()
@@ -631,7 +731,9 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
             main.post {
                 val (g, k) = parse(utteranceId) ?: return@post
                 if (g != gen) return@post
+                kick(allowFor(segs.getOrNull(k + 1)?.let { segText(k + 1) }))
                 if (utteranceId?.endsWith(":e") != true) return@post   // only act when a whole sentence is done
+                stalls = 0
                 val next = k + 1
                 if (sleepAtChapterEnd && next < segs.size &&
                     chapterIndexOf(segs[next].para) != chapterIndexOf(segs[k].para)
@@ -658,6 +760,23 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
             main.post {
                 val (g, k) = parse(utteranceId) ?: return@post
                 if (g != gen || !playing) return@post
+                errorsInRow++
+                CrashReport.note(this@TtsService, "voice error #$errorsInRow at sentence ${k + 1}: \"${segs.getOrNull(k)?.let { segText(k).take(120) }}\"")
+                if (errorsInRow >= 3) {
+                    // the phone's own speech engine may have crashed: restart it once, then stop and say why
+                    if (neuralVoice() == null && !rebuilt) {
+                        rebuilt = true; errorsInRow = 0
+                        CrashReport.note(this@TtsService, "restarting the speech engine")
+                        ready = false
+                        try { tts?.shutdown() } catch (_: Throwable) {}
+                        segIndex = k
+                        tts = TextToSpeech(this@TtsService, this@TtsService)
+                        return@post
+                    }
+                    pause()
+                    toast("The voice isn't working" + (lastVoiceError?.let { " ($it)" } ?: "") + ". Try another voice, or check your internet if it's an online one.")
+                    return@post
+                }
                 if (k + 1 < segs.size) speakFrom(k + 1) else finished()
             }
         }
@@ -806,6 +925,7 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
         instance = null
         gen++
         main.removeCallbacks(sleepTick)
+        main.removeCallbacks(watchdog)
         main.removeCallbacks(statsTick)
         try { audioManager.unregisterAudioDeviceCallback(deviceCallback) } catch (e: Throwable) {}
         try { unregisterReceiver(noisyReceiver) } catch (e: Throwable) {}

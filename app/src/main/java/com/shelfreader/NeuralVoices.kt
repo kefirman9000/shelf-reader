@@ -147,23 +147,7 @@ object NeuralVoices {
         } finally { CrashReport.busy(ctx, null) }
     }
 
-    /** Splits text at commas, semicolons or spaces into parts the model handles safely; drops parts with nothing to say. */
-    fun chunks(text: String, max: Int = 220): List<String> {
-        val t = text.replace(Regex("\\s+"), " ").trim()
-        if (!t.any { it.isLetterOrDigit() }) return emptyList()
-        if (t.length <= max) return listOf(t)
-        val out = ArrayList<String>(); var rest = t
-        while (rest.length > max) {
-            val window = rest.substring(0, max)
-            var cut = maxOf(window.lastIndexOf(", "), window.lastIndexOf("; "), window.lastIndexOf(": "), window.lastIndexOf(" — "))
-            if (cut < max / 3) cut = window.lastIndexOf(' ')
-            if (cut < max / 3) cut = max - 1
-            out += rest.substring(0, cut + 1).trim()
-            rest = rest.substring(cut + 1).trim()
-        }
-        if (rest.isNotEmpty()) out += rest
-        return out.filter { p -> p.any { it.isLetterOrDigit() } }
-    }
+    fun chunks(text: String, max: Int = 220): List<String> = SpeechText.chunks(SpeechText.clean(text), max)
 
     /** Makes audio for a short text (for previews and clips). */
     fun generate(ctx: Context, voice: String, text: String, speed: Float): Pair<FloatArray, Int>? {

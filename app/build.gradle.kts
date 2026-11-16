@@ -6,6 +6,7 @@ plugins {
 val buildNumber = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInt()
 
 android {
+    testOptions { unitTests.isReturnDefaultValues = true }
     namespace = "com.shelfreader"
     compileSdk = 34
 
@@ -54,4 +55,5 @@ dependencies {
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
     // unpacks the downloaded voice models (.tar.bz2)
     implementation("org.apache.commons:commons-compress:1.27.1")
+    testImplementation("junit:junit:4.13.2")
 }

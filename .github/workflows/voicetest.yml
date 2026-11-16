@@ -6,8 +6,11 @@ on:
   workflow_dispatch:
     inputs:
       model:
-        description: 'Voice model id'
+        description: 'Voice model id (voice test)'
         default: 'kokoro-int8-en-v0_19'
+      mode:
+        description: 'voice = test a natural voice; read = read the hard-cases book start to end (voice: default or a model id)'
+        default: 'voice'
 
 jobs:
   test:
@@ -40,7 +43,7 @@ jobs:
           disk-size: 6G
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
-          script: bash tools/voicetest.sh "${{ github.event.inputs.model }}"
+          script: bash tools/voicetest.sh "${{ github.event.inputs.model }}" "${{ github.event.inputs.mode }}"
       - name: Save log
         if: always()
         run: |

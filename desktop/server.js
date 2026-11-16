@@ -97,6 +97,12 @@ function startServer(opts = {}) {
     const m = (re) => re.exec(p);
     let mm;
 
+    if (p === '/api/crashlog') {
+      const f = opts.crashLog;
+      if (!f || !fs.existsSync(f)) return send(res, 404, { error: 'none' });
+      res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+      return res.end(fs.readFileSync(f, 'utf8').slice(-20000));
+    }
     if (p === '/api/info') {
       return send(res, 200, {
         version, edge: !!opts.openEdge, chrome: !!(opts.findChrome && opts.findChrome()),

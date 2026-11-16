@@ -323,7 +323,35 @@
     return out;
   }
 
-  const api = { continues, lineLength, joinText, mendParagraphs, normalize, pieces, endPause, vary, chapterOpening, isHeadingOf, headerLines, isPageNumber, improveChapters, words, ordinal, year, roman, titleCase };
+  // invisible or broken characters that make voices stumble, freeze or go silent
+  const INVISIBLE = /[\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180B-\u180E\u200B-\u200F\u202A-\u202E\u2060-\u206F\uFE00-\uFE0F\uFEFF\uFFF9-\uFFFC]/g;
+  const ODD_SPACE = /[\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000\t\r\n]/g;
+  const JUNK = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\uFFFD\uE000-\uF8FF]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+  const RUNS = /([^\p{L}\p{N}\s])\1{3,}/gu;
+  /** Text made safe for any voice: no invisible, control, broken or private-use characters; one kind of space. */
+  function clean(s) {
+    return String(s).replace(INVISIBLE, '').replace(JUNK, ' ').replace(ODD_SPACE, ' ').replace(RUNS, '$1').replace(/ {2,}/g, ' ').trim();
+  }
+  /** True when there's something a voice can actually say (a letter or a digit). */
+  const hasWords = (s) => /[\p{L}\p{N}]/u.test(s);
+  /** Splits long text at commas, semicolons or spaces into parts no longer than max; drops parts with nothing to say. */
+  function chunks(text, max = 220) {
+    const t = String(text).replace(/\s+/g, ' ').trim();
+    if (!hasWords(t)) return [];
+    if (t.length <= max) return [t];
+    const out = []; let rest = t;
+    while (rest.length > max) {
+      const w = rest.slice(0, max);
+      let cut = Math.max(w.lastIndexOf(', '), w.lastIndexOf('; '), w.lastIndexOf(': '), w.lastIndexOf(' — '));
+      if (cut < max / 3) cut = w.lastIndexOf(' ');
+      if (cut < max / 3) cut = max - 1;
+      out.push(rest.slice(0, cut + 1).trim()); rest = rest.slice(cut + 1).trim();
+    }
+    if (rest) out.push(rest);
+    return out.filter(hasWords);
+  }
+
+  const api = { clean, hasWords, chunks, continues, lineLength, joinText, mendParagraphs, normalize, pieces, endPause, vary, chapterOpening, isHeadingOf, headerLines, isPageNumber, improveChapters, words, ordinal, year, roman, titleCase };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.SpeechText = api;
 })(typeof self !== 'undefined' ? self : this);

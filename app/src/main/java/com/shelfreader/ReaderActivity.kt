@@ -1452,6 +1452,7 @@ class ReaderActivity : Activity(), BookPageView.Host {
             SheetRow("📊", "Reading stats") { action(16) },
             SheetRow("⏮", "Back to the start") { action(9) },
             SheetRow("⚙", "Android speech settings") { action(10) },
+            SheetRow("🐞", "Report a problem", "Stuck, skipping, wrong words? Sends what the app was doing") { CrashReport.reportProblem(this) },
             SheetRow("💡", "How to use the reader", "Taps, swipes and shortcuts") {
                 AlertDialog.Builder(this).setTitle("How to use the reader").setMessage(
                     "• Tap a paragraph to read aloud from there.\n" +

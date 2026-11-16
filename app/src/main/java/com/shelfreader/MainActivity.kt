@@ -116,7 +116,8 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         CrashReport.install(this)
         intent?.getStringExtra("selftest_voice")?.let { SelfTest.run(applicationContext, it) }
-        if (intent?.getStringExtra("selftest_voice") == null) CrashReport.check(this)
+        intent?.getStringExtra("selftest_read")?.let { SelfTest.read(applicationContext, it.ifBlank { null }?.takeIf { v -> v != "default" }) }
+        if (intent?.getStringExtra("selftest_voice") == null && intent?.getStringExtra("selftest_read") == null) CrashReport.check(this)
 
         window.statusBarColor = UiColors.SURFACE
         window.navigationBarColor = UiColors.SURFACE
@@ -493,6 +494,7 @@ class MainActivity : Activity() {
         add(settingRow("💾", "Back up library", "Save books, places and notes to one file") { backupLibrary() })
         add(settingRow("📥", "Restore from backup", "Bring back a backup file") { restoreLibrary() })
         add(sectionTitle("App"))
+        add(settingRow("🐞", "Report a problem", "Stuck, skipping, crashes: makes a report of what the app was doing") { CrashReport.reportProblem(this) })
         add(settingRow("⬆", "Check for updates", "You have build ${Updater.currentBuild(this)}") { checkUpdates(true) })
         add(settingRow("🔑", "GitHub token for updates", if (Settings.updateToken(this) != null) "Saved · updates work while the repository is private" else "Needed while the repository is private") { tokenDialog() })
         settingsPane.removeAllViews()

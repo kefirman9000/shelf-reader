@@ -7,6 +7,39 @@ import android.util.Log
 object SelfTest {
     private const val TAG = "ShelfSelfTest"
     private val started = java.util.concurrent.atomic.AtomicBoolean(false)
+    /** Reads the "hard cases" book from start to end at high speed and checks reading never gets stuck. */
+    fun read(ctx: Context, voice: String?) {
+        if (!started.compareAndSet(false, true)) return
+        Thread {
+            try {
+                Log.i(TAG, "READ START voice=${voice ?: "default"}")
+                val id = "torture"
+                val f = java.io.File(Library.dir(ctx), "$id.txt")
+                ctx.assets.open("torture.txt").use { i -> f.outputStream().use { i.copyTo(it) } }
+                if (Library.get(ctx, id) == null) Library.add(ctx, Book(id, "Hard cases", "Test", f.name, "txt", System.currentTimeMillis()))
+                Settings.setBookRate(ctx, id, 3f)
+                if (voice != null) Settings.setBookVoice(ctx, id, voice)
+                ctx.startForegroundService(android.content.Intent(ctx, TtsService::class.java).setAction(TtsService.ACTION_PLAY).putExtra(TtsService.EXTRA_BOOK, id))
+                var lastSeg = -1; var still = 0; var started2 = false
+                for (tick in 0 until 900) {
+                    Thread.sleep(1000)
+                    val s = TtsService.instance ?: continue
+                    val (seg, total, _) = s.testState()
+                    if (s.playing) started2 = true
+                    if (seg != lastSeg) { Log.i(TAG, "at ${seg + 1}/$total: ${s.currentSegText()?.take(60)}"); lastSeg = seg; still = 0 } else still++
+                    if (started2 && !s.playing) {
+                        val ok = seg >= total - 3
+                        Log.i(TAG, "stopped at ${seg + 1}/$total, stalls recovered: ${s.testStallsTotal()}")
+                        Log.i(TAG, if (ok) "SELFTEST DONE OK" else "SELFTEST FAILED: stopped before the end")
+                        return@Thread
+                    }
+                    if (still > 120) { Log.e(TAG, "SELFTEST FAILED: stuck at ${seg + 1}/$total for 2 minutes"); return@Thread }
+                }
+                Log.e(TAG, "SELFTEST FAILED: took too long")
+            } catch (t: Throwable) { Log.e(TAG, "SELFTEST FAILED", t) }
+        }.start()
+    }
+
     fun run(ctx: Context, modelId: String) {
         if (!started.compareAndSet(false, true)) return   // the screen can be created twice; run the test once
         Thread {

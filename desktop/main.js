@@ -12,6 +12,20 @@ const updates = createUpdater();
 let win = null;
 let port = null;
 
+// crash log: kept in the app's data folder and added to problem reports
+const crashLog = () => path.join(app.getPath('userData'), 'crash.log');
+function logCrash(what) {
+  try {
+    const f = crashLog();
+    const old = fs.existsSync(f) ? fs.readFileSync(f, 'utf8').slice(-15000) : '';
+    fs.writeFileSync(f, old + `\n[${new Date().toISOString()}] v${app.getVersion()} ${what}\n`);
+  } catch (_) {}
+}
+process.on('uncaughtException', (e) => logCrash('main process: ' + (e && e.stack || e)));
+process.on('unhandledRejection', (e) => logCrash('main process (promise): ' + (e && e.stack || e)));
+app.on('render-process-gone', (_e, _wc, d) => logCrash(`window closed unexpectedly: ${d.reason} (exit code ${d.exitCode})`));
+app.on('child-process-gone', (_e, d) => { if (d.reason !== 'clean-exit') logCrash(`${d.type} process gone: ${d.reason} (exit code ${d.exitCode})`); });
+
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
@@ -24,6 +38,7 @@ if (!app.requestSingleInstanceLock()) {
       dataDir: path.join(app.getPath('userData'), 'library'),
       port: 47321,
       version: app.getVersion(),
+      crashLog: crashLog(),
       updates,
       openExternal: (url) => shell.openExternal(url),
       openEdge: (url) => shell.openExternal('microsoft-edge:' + url).catch(() => shell.openExternal(url)),
@@ -79,6 +94,8 @@ function createWindow() {
       spellcheck: false
     }
   });
+  // if the page itself crashes, bring it back instead of leaving a blank window
+  win.webContents.on('render-process-gone', (_e, d) => { if (d.reason !== 'clean-exit' && win && !win.isDestroyed()) setTimeout(() => { try { win.reload(); } catch (_) {} }, 800); });
   win.removeMenu();
   win.loadURL(`http://127.0.0.1:${port}/`);
   // Links that leave the app open in the normal browser.

@@ -34,6 +34,13 @@ jobs:
       - name: Fetch sherpa-onnx runtime
         run: bash tools/fetch_sherpa.sh
 
+      # The "hard cases" book (tools/torture.txt): every sentence must be read or skipped, never get stuck
+      - name: Hard-cases tests (phone)
+        run: gradle testDebugUnitTest --no-daemon --stacktrace
+
+      - name: Hard-cases tests (PC and audiobook maker)
+        run: node desktop/test/hardcases.test.js
+
       - name: Build
         run: gradle assembleRelease --no-daemon --stacktrace
 

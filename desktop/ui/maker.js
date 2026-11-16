@@ -1184,7 +1184,8 @@ function textChunks(c, max, skipRefs, skipFirst, P = { para: 0.4, scene: 1.6 }) 
           let gap = pc.gap / 1000 / sp;
           if (end) gap = lastGroup ? Math.max(paraGap, gap) : Math.max(0.24, gap);
           if (/[—–]["”’»]?$/.test(pc.t)) gap = Math.min(gap, 0.06);
-          if (pc.t.trim()) out.push({ t: pc.t.trim(), end: end && lastGroup, who: g.who, gap: SpeechText.vary(gap * 1000) / 1000, around: g.who !== null ? narration : '' });
+          const ct = SpeechText.clean(pc.t);   // hidden or broken characters can make voices stall or fail
+          if (SpeechText.hasWords(ct)) out.push({ t: ct, end: end && lastGroup, who: g.who, gap: SpeechText.vary(gap * 1000) / 1000, around: g.who !== null ? narration : '' });
         });
         return;
       }

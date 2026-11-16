@@ -40,7 +40,7 @@ object CrashReport {
         Thread.setDefaultUncaughtExceptionHandler { t, e ->
             try {
                 val busy = try { busyFile(app).readText() } catch (_: Throwable) { "" }
-                crashFile(app).writeText("Thread: ${t.name}\n" + (if (busy.isNotBlank()) "Natural voice busy: $busy\n" else "") + e.stackTraceToString().take(12_000))
+                crashFile(app).writeText("Recent events:\n" + eventLog(app).takeLast(3000) + "\n\nThread: ${t.name}\n" + (if (busy.isNotBlank()) "Natural voice busy: $busy\n" else "") + e.stackTraceToString().take(12_000))
                 // This crash has its own stack trace, so it isn't the voice engine dying in native code.
                 // Clear the marker so the next launch doesn't blame the voice and slow it down.
                 busyFile(app).delete()
@@ -126,6 +126,57 @@ object CrashReport {
                 }
                 .setNegativeButton("Not now", null).show()
         }
+    }
+
+    // ---------- event log and "Report a problem" ----------
+    private val events = ArrayDeque<String>()
+    private val tf = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US)
+
+    /** Remembers something worth knowing if a problem is reported (stalls, voice errors, skips). Last 60 kept. */
+    fun note(ctx: Context?, msg: String) {
+        val line = tf.format(java.util.Date()) + " " + msg.take(300)
+        synchronized(events) { events.addLast(line); while (events.size > 60) events.removeFirst() }
+        android.util.Log.i("ShelfReader", msg)
+        if (ctx != null) try { File(ctx.filesDir, "events.txt").writeText(synchronized(events) { events.joinToString("\n") }) } catch (_: Throwable) {}
+    }
+
+    private fun eventLog(ctx: Context): String {
+        val mem = synchronized(events) { events.joinToString("\n") }
+        if (mem.isNotBlank()) return mem
+        return try { File(ctx.filesDir, "events.txt").readText() } catch (_: Throwable) { "" }
+    }
+
+    /** Everything needed to reproduce a problem: app, phone, book, where it was, the sentence, voice, settings, recent events. */
+    fun problemReport(ctx: Context, what: String): String {
+        val s = TtsService.instance
+        val sb = StringBuilder()
+        sb.append("Shelf Reader ").append(try { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName } catch (_: Throwable) { "" })
+            .append(" · Android ${Build.VERSION.RELEASE} · ${Build.MANUFACTURER} ${Build.MODEL}\n\n")
+        sb.append("What happened: ").append(what.ifBlank { "(not described)" }).append("\n\n")
+        if (s != null) sb.append(s.diagnostics()).append("\n")
+        sb.append("Settings: natural pauses ${Settings.naturalPauses(ctx)}, say numbers ${Settings.speakNumbers(ctx)}, " +
+            "fix broken lines ${Settings.fixBrokenLines(ctx)}, skip clutter ${Settings.skipClutter(ctx)}, gentle voices ${safeVoices(ctx)}\n\n")
+        sb.append("Recent events:\n").append(eventLog(ctx).ifBlank { "(none)" })
+        return sb.toString()
+    }
+
+    /** Asks what went wrong, then shares the report. */
+    fun reportProblem(a: Activity) {
+        val box = android.widget.EditText(a).apply { hint = "What went wrong? (e.g. it stopped reading here)"; minLines = 2 }
+        val pad = android.widget.FrameLayout(a).apply { setPadding(48, 16, 48, 0); addView(box) }
+        AlertDialog.Builder(a).setTitle("Report a problem")
+            .setMessage("Makes a report with the book's name, the sentence it's on, the voice and settings, and what the app did recently. Nothing is sent until you choose where.")
+            .setView(pad)
+            .setPositiveButton("Share report") { _, _ ->
+                val r = problemReport(a, box.text.toString())
+                try { a.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain")
+                    .putExtra(Intent.EXTRA_SUBJECT, "Shelf Reader problem report").putExtra(Intent.EXTRA_TEXT, r), "Send report")) } catch (_: Throwable) {}
+            }
+            .setNeutralButton("Copy") { _, _ ->
+                val cm = a.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                cm.setPrimaryClip(android.content.ClipData.newPlainText("Shelf Reader report", problemReport(a, box.text.toString()))); a.toast("Report copied")
+            }
+            .setNegativeButton("Cancel", null).show()
     }
 
     private fun reasonName(r: Int) = when (r) {

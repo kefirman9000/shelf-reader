@@ -354,6 +354,51 @@ object SpeechText {
         return if (Regex("\\p{Ll}-$").containsMatchIn(x) && y.firstOrNull()?.isLowerCase() == true) x.dropLast(1) + y else "$x $y"
     }
 
+    // invisible or broken characters that make voices stumble, freeze or go silent
+    private val invisible = Regex("[\\u00AD\\u034F\\u061C\\u115F\\u1160\\u17B4\\u17B5\\u180B-\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u206F\\uFE00-\\uFE0F\\uFEFF\\uFFF9-\\uFFFC]")
+    private val oddSpace = Regex("[\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000\\t\\r\\n]")
+    private val junk = Regex("[\\u0000-\\u0008\\u000B\\u000C\\u000E-\\u001F\\u007F-\\u009F\\uFFFD\\uE000-\\uF8FF]|\\p{Cs}")
+    private val runs = Regex("([^\\p{L}\\p{N}\\s])\\1{3,}")   // "-----", "*****", "……"
+
+    /** Text made safe for any voice: no invisible, control, broken or private-use characters; one kind of space. */
+    fun clean(s: String): String {
+        var t = invisible.replace(s, "")
+        t = junk.replace(t, " ")
+        t = oddSpace.replace(t, " ")
+        // lone halves of emoji/surrogate pairs crash some engines
+        val sb = StringBuilder(t.length)
+        var i = 0
+        while (i < t.length) {
+            val c = t[i]
+            if (Character.isHighSurrogate(c) && i + 1 < t.length && Character.isLowSurrogate(t[i + 1])) { sb.append(c).append(t[i + 1]); i += 2; continue }
+            if (Character.isSurrogate(c)) { i++; continue }
+            sb.append(c); i++
+        }
+        t = runs.replace(sb.toString()) { it.groupValues[1] }
+        return t.replace(Regex(" {2,}"), " ").trim()
+    }
+
+    /** True when there's something a voice can actually say (a letter or a digit). */
+    fun hasWords(s: String) = s.any { it.isLetterOrDigit() }
+
+    /** Splits long text at commas, semicolons or spaces into parts no longer than [max]; drops parts with nothing to say. */
+    fun chunks(text: String, max: Int = 220): List<String> {
+        val t = text.replace(Regex("\\s+"), " ").trim()
+        if (!hasWords(t)) return emptyList()
+        if (t.length <= max) return listOf(t)
+        val out = ArrayList<String>(); var rest = t
+        while (rest.length > max) {
+            val window = rest.substring(0, max)
+            var cut = maxOf(window.lastIndexOf(", "), window.lastIndexOf("; "), window.lastIndexOf(": "), window.lastIndexOf(" — "))
+            if (cut < max / 3) cut = window.lastIndexOf(' ')
+            if (cut < max / 3) cut = max - 1
+            out += rest.substring(0, cut + 1).trim()
+            rest = rest.substring(cut + 1).trim()
+        }
+        if (rest.isNotEmpty()) out += rest
+        return out.filter { hasWords(it) }
+    }
+
     /** A tiny steady change of pace per paragraph (±2%). */
     fun paceFor(para: Int): Float = 1f + (((para * 7919) % 41) - 20) / 1000f
 }
