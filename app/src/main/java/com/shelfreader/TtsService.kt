@@ -798,6 +798,7 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
         tts?.shutdown()
         tts = null
         neural?.shutdown(); neural = null
+        Thread { try { NeuralVoices.release() } catch (_: Throwable) {} }.start()   // give the memory back
         NeuralVoices.release()
         session.release()
         releaseWake()

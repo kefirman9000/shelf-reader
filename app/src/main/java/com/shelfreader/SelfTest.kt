@@ -21,6 +21,10 @@ object SelfTest {
                 Log.i(TAG, "generated ${r?.first?.size} samples at ${r?.second} Hz in ${System.currentTimeMillis() - t0} ms")
                 if (r != null) NeuralVoices.playOnce(r.first, r.second)
                 Thread.sleep(4000)
+                for (s in listOf("", "—", "…", "12:30 pm, \$4.50 and Chapter XII.", "and so it went on " + "word ".repeat(400))) {
+                    val g = NeuralVoices.generate(ctx, NeuralVoices.key(m, m.voices[0].first), s, 1f)
+                    Log.i(TAG, "edge '${s.take(20)}' (${s.length} chars) -> ${g?.first?.size} samples")
+                }
                 val done = Object()
                 val sp = NeuralSpeaker(ctx, { Log.i(TAG, "start $it") }, { Log.i(TAG, "done $it"); if (it == "b") synchronized(done) { (done as Object).notifyAll() } }, { id, msg -> Log.e(TAG, "error $id $msg") })
                 sp.voice = NeuralVoices.key(m, m.voices[0].first)

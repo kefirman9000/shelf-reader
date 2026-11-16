@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Called by the Voice test workflow inside the emulator runner.
 set -u
-model="${1:-kokoro-en-v0_19}"
+model="${1:-kokoro-int8-en-v0_19}"
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 adb logcat -c
 adb shell am start -n com.shelfreader/.MainActivity --es selftest_voice "$model"

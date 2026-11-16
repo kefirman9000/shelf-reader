@@ -29,7 +29,8 @@ object NeuralVoices {
     data class Model(val id: String, val title: String, val kind: String, val sizeMb: Int, val lang: String, val file: String, val voices: List<Pair<Int, String>>)
 
     val MODELS = listOf(
-        Model("kokoro-en-v0_19", "Kokoro (most natural, English)", "kokoro", 305, "en", "model.onnx", listOf(
+        // the compact (int8) build: same voices, a third of the size and memory — the full one got phones to close the app
+        Model("kokoro-int8-en-v0_19", "Kokoro (most natural, English)", "kokoro", 100, "en", "model.int8.onnx", listOf(
             1 to "Bella · American woman", 3 to "Sarah · American woman", 2 to "Nicole · American woman, soft", 4 to "Sky · American woman",
             0 to "Kokoro default · American woman", 6 to "Michael · American man", 5 to "Adam · American man",
             7 to "Emma · British woman", 8 to "Isabella · British woman", 9 to "George · British man", 10 to "Lewis · British man")),
@@ -46,12 +47,17 @@ object NeuralVoices {
         Model("vits-piper-pt_BR-faber-medium", "Piper Faber", "piper", 64, "pt", "pt_BR-faber-medium.onnx", listOf(0 to "Faber · Brazilian man"))
     )
 
+    /** The earlier, full-size Kokoro download (320 MB). Voices chosen with it now use the compact one. */
+    const val OLD_KOKORO = "kokoro-en-v0_19"
+    fun oldKokoroDir(ctx: Context) = File(ctx.getExternalFilesDir(null) ?: ctx.filesDir, "voices/$OLD_KOKORO")
+
     fun isNeural(voice: String?) = voice?.startsWith("neural:") == true
     fun key(m: Model, sid: Int) = "neural:${m.id}:$sid"
     fun parse(voice: String?): Pair<Model, Int>? {
         if (!isNeural(voice)) return null
         val parts = voice!!.split(":")
-        val m = MODELS.firstOrNull { it.id == parts.getOrNull(1) } ?: return null
+        val id = parts.getOrNull(1).let { if (it == OLD_KOKORO) "kokoro-int8-en-v0_19" else it }
+        val m = MODELS.firstOrNull { it.id == id } ?: return null
         return m to (parts.getOrNull(2)?.toIntOrNull() ?: 0)
     }
     fun label(voice: String?): String? = parse(voice)?.let { (m, sid) -> m.voices.firstOrNull { it.first == sid }?.second ?: m.title }
@@ -80,6 +86,7 @@ object NeuralVoices {
                 }
             }
             File(target, ".done").writeText("ok")
+            if (m.kind == "kokoro") oldKokoroDir(ctx).deleteRecursively()   // free the old 320 MB copy
         } finally { tmp.delete() }
     }
 
@@ -94,7 +101,12 @@ object NeuralVoices {
         if (loadedId == m.id && loaded != null) return loaded!!
         loaded?.release(); loaded = null; loadedId = null
         val d = dir(ctx, m)
-        val threads = Runtime.getRuntime().availableProcessors().coerceIn(2, 4)
+        // don't start loading when the phone is nearly out of memory: Android would close the app
+        val am = ctx.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+        val mi = android.app.ActivityManager.MemoryInfo().also { am.getMemoryInfo(it) }
+        val need = (m.sizeMb * 2L + 60) * 1_000_000L
+        if (mi.availMem < need) throw Exception("Not enough free memory for this voice right now. Close some apps and try again, or pick a Piper voice (smaller).")
+        val threads = 2
         val model = if (m.kind == "kokoro") OfflineTtsModelConfig(
             kokoro = OfflineTtsKokoroModelConfig(model = "$d/${m.file}", voices = "$d/voices.bin", tokens = "$d/tokens.txt", dataDir = "$d/espeak-ng-data"),
             numThreads = threads, provider = "cpu")
@@ -112,8 +124,34 @@ object NeuralVoices {
     /** One generation at a time: the playback queue, previews and clips share the loaded model. */
     @Synchronized
     fun gen(ctx: Context, m: Model, text: String, sid: Int, speed: Float): Pair<FloatArray, Int> {
-        val a = engine(ctx, m).generate(text, sid, speed)
-        return a.samples to a.sampleRate
+        val tts = engine(ctx, m)
+        val parts = chunks(text)
+        if (parts.isEmpty()) return FloatArray(0) to tts.sampleRate()
+        if (parts.size == 1) { val a = tts.generate(parts[0], sid, speed); return a.samples to a.sampleRate }
+        // long pieces are made in parts and joined with a short breath, so the model never gets more than it can take
+        val out = ArrayList<FloatArray>(); var rate = tts.sampleRate()
+        for (p in parts) { val a = tts.generate(p, sid, speed); rate = a.sampleRate; out += a.samples; out += FloatArray(rate / 12) }
+        val all = FloatArray(out.sumOf { it.size }); var o = 0
+        for (a in out) { System.arraycopy(a, 0, all, o, a.size); o += a.size }
+        return all to rate
+    }
+
+    /** Splits text at commas, semicolons or spaces into parts the model handles safely; drops parts with nothing to say. */
+    fun chunks(text: String, max: Int = 220): List<String> {
+        val t = text.replace(Regex("\\s+"), " ").trim()
+        if (!t.any { it.isLetterOrDigit() }) return emptyList()
+        if (t.length <= max) return listOf(t)
+        val out = ArrayList<String>(); var rest = t
+        while (rest.length > max) {
+            val window = rest.substring(0, max)
+            var cut = maxOf(window.lastIndexOf(", "), window.lastIndexOf("; "), window.lastIndexOf(": "), window.lastIndexOf(" — "))
+            if (cut < max / 3) cut = window.lastIndexOf(' ')
+            if (cut < max / 3) cut = max - 1
+            out += rest.substring(0, cut + 1).trim()
+            rest = rest.substring(cut + 1).trim()
+        }
+        if (rest.isNotEmpty()) out += rest
+        return out.filter { p -> p.any { it.isLetterOrDigit() } }
     }
 
     /** Makes audio for a short text (for previews and clips). */
@@ -194,8 +232,8 @@ class NeuralSpeaker(
     private val player = Thread({
         while (alive) {
             val c = try { ready.take() } catch (_: InterruptedException) { continue }
-            if (c.epoch != epoch.get()) continue
-            val t = trackFor(c.rate)
+            if (c.epoch != epoch.get() || c.samples.isEmpty()) { if (c.epoch == epoch.get()) main.post { if (c.epoch == epoch.get()) { onStart(c.id); onDone(c.id) } }; continue }
+            val t = try { trackFor(c.rate) } catch (e: Throwable) { main.post { onError(c.id, "Couldn't open the speaker: ${e.message}") }; continue }
             main.post { if (c.epoch == epoch.get()) onStart(c.id) }
             val start = t.playbackHeadPosition.toLong() and 0xffffffffL
             var off = 0
@@ -206,9 +244,11 @@ class NeuralSpeaker(
             }
             // wait until it has actually been heard
             val endFrame = start + off
-            while (alive && c.epoch == epoch.get() && (t.playbackHeadPosition.toLong() and 0xffffffffL) < endFrame - c.rate / 50) Thread.sleep(15)
+            try { while (alive && c.epoch == epoch.get() && (t.playbackHeadPosition.toLong() and 0xffffffffL) < endFrame - c.rate / 50) Thread.sleep(15) } catch (_: InterruptedException) {}
             if (c.epoch == epoch.get()) main.post { if (c.epoch == epoch.get()) onDone(c.id) }
         }
+        // only this thread writes to the track, so only it releases it (releasing mid-write crashes)
+        synchronized(this) { try { track?.release() } catch (_: Throwable) {}; track = null }
     }, "neural-player")
 
     init { maker.start(); player.start() }
@@ -248,6 +288,5 @@ class NeuralSpeaker(
         alive = false
         stop()
         maker.interrupt(); player.interrupt()
-        synchronized(this) { track?.release(); track = null }
     }
 }

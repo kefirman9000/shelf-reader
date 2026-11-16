@@ -97,7 +97,7 @@ Your book never leaves your device, except when you choose a premium voice. That
 
 Tap **🗣 Voice → 🌟 Natural voices on this phone** in the player to get much more natural voices that run on the phone itself, even offline:
 
-- **Kokoro** (about 305 MB, one download) has 11 very natural English voices, American and British, men and women.
+- **Kokoro** (about 100 MB, one download; the compact build that runs smoothly on phones) has 11 very natural English voices, American and British, men and women.
 - **Piper** (about 64 MB each) has clear voices in English, German, Spanish, French, Italian and Portuguese.
 
 Tap a voice to hear it, then choose **Use it**. Each book can have its own voice. You can remove downloaded voices from the same screen to free up space. These voices are powered by [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) (Apache-2.0), which the build fetches at a pinned version.
