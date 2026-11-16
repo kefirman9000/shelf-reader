@@ -32,20 +32,7 @@ jobs:
       # Natural offline voices (Kokoro / Piper) run on the phone with sherpa-onnx (Apache-2.0).
       # Its native libraries and Kotlin API file are fetched here at a pinned version, not kept in this repository.
       - name: Fetch sherpa-onnx runtime
-        run: |
-          set -e
-          V=1.12.14
-          mkdir -p /tmp/so app/src/main/java/com/k2fsa/sherpa/onnx
-          curl -fsSL -o /tmp/so.tar.bz2 "https://github.com/k2-fsa/sherpa-onnx/releases/download/v$V/sherpa-onnx-v$V-android.tar.bz2"
-          tar xjf /tmp/so.tar.bz2 -C /tmp/so
-          for abi in arm64-v8a armeabi-v7a; do
-            mkdir -p app/src/main/jniLibs/$abi
-            found=$(find /tmp/so -type d -name "$abi" | head -1)
-            test -n "$found"
-            cp "$found"/*.so app/src/main/jniLibs/$abi/
-          done
-          ls -la app/src/main/jniLibs/*
-          curl -fsSL -o app/src/main/java/com/k2fsa/sherpa/onnx/Tts.kt "https://raw.githubusercontent.com/k2-fsa/sherpa-onnx/v$V/sherpa-onnx/kotlin-api/Tts.kt"
+        run: bash tools/fetch_sherpa.sh
 
       - name: Build
         run: gradle assembleRelease --no-daemon --stacktrace

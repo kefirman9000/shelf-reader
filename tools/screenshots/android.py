@@ -151,7 +151,9 @@ def reader():
     tap(desc="More", exact=True); shot("android-17-more-menu"); back()
     tap(desc="Text size and look", exact=True); shot("android-18-text-and-look"); back()
     tap(desc="Contents", exact=True); shot("android-19-contents"); back()
-    tap("Voice"); time.sleep(3); shot("android-20-voice"); back()
+    tap("Voice"); time.sleep(3); shot("android-20-voice")
+    if tap("Natural voices", wait=1.5): shot("android-20b-natural-voices"); back()
+    back()
 step("reader", reader)
 
 
