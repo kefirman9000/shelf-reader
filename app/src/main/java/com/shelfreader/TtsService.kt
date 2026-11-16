@@ -76,6 +76,14 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
     fun currentSeg(): Seg? = segs.getOrNull(segIndex)
 
     private var tts: TextToSpeech? = null
+    /** Natural on-phone voices (Kokoro / Piper); used when the book's voice is one of them. */
+    private var neural: NeuralSpeaker? = null
+    private fun neuralVoice(): String? = Settings.voiceFor(this, bookId)?.takeIf { NeuralVoices.isNeural(it) && NeuralVoices.parse(it)?.let { (m, _) -> NeuralVoices.installed(this, m) } == true }
+    private fun neuralSpeaker(): NeuralSpeaker = neural ?: NeuralSpeaker(this,
+        onStart = { id -> progressListener.onStart(id) },
+        onDone = { id -> progressListener.onDone(id) },
+        onError = { id, msg -> toast("The natural voice had a problem: $msg"); @Suppress("DEPRECATION") progressListener.onError(id) }
+    ).also { neural = it }
     private var ready = false
     private var speaker: Speaker? = null
     private var gen = 0
@@ -282,6 +290,7 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
         val d = try { Library.doc(this, b) } catch (t: Throwable) { return false }
         gen++
         tts?.stop()
+        neural?.stop()
         paras = d.paras
         chapters = d.chapters
         segs = Speech.segments(paras)
@@ -379,6 +388,7 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
         playing = false
         gen++
         tts?.stop()
+        neural?.stop()
         releaseWake()
         update()
     }
@@ -448,7 +458,7 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
         val t = tts ?: return
         if (!ready) return
         t.setSpeechRate(Settings.rateFor(this, bookId))
-        val wanted = Settings.voiceFor(this, bookId)
+        val wanted = Settings.voiceFor(this, bookId)?.takeIf { !NeuralVoices.isNeural(it) }
         val used = VoiceNames.apply(t, wanted)
         if (wanted != null && used == null && warnedVoice != wanted) {
             warnedVoice = wanted
@@ -468,6 +478,7 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
         val t = tts ?: return
         gen++
         t.stop()
+        neural?.stop()
         segIndex = si.coerceIn(0, maxOf(0, segs.size - 1))
         queuedUpTo = segIndex - 1
         lastSpoken = -1
@@ -482,22 +493,30 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
         var spoke = false
         val natural = Settings.naturalPauses(this)
         val rate = Settings.rateFor(this, bookId)
+        val nv = neuralVoice()
+        val ns = if (nv != null) neuralSpeaker().also { it.voice = nv } else null
         while (queuedUpTo < segs.size - 1 && (queuedUpTo < segIndex + 4 || (first && !spoke))) {
             val k = ++queuedUpTo
             val (items, lastK) = itemsFor(k, sp, natural) ?: continue
             queuedUpTo = lastK
-            if (natural) t.setSpeechRate(rate * SpeechText.paceFor(segs[k].para))
+            val pace = if (natural) SpeechText.paceFor(segs[k].para) else 1f
+            if (natural && ns == null) t.setSpeechRate(rate * pace)
             for ((j, it) in items.withIndex()) {
                 val last = j == items.size - 1
-                t.speak(it.text, mode, null, if (last) "$gen:$lastK:e" else "$gen:$k:$j")
+                val id = if (last) "$gen:$lastK:e" else "$gen:$k:$j"
+                if (ns != null) ns.speak(it.text, mode == TextToSpeech.QUEUE_FLUSH, id, rate * pace)
+                else t.speak(it.text, mode, null, id)
                 mode = TextToSpeech.QUEUE_ADD
                 val gap = if (natural) gapAfter(lastK, it.gapMs, last) else 0
-                if (gap > 30) t.playSilentUtterance(gap.toLong(), TextToSpeech.QUEUE_ADD, "$gen:$lastK:p$j")
+                if (gap > 30) {
+                    if (ns != null) ns.silence(gap.toLong(), "$gen:$lastK:p$j")
+                    else t.playSilentUtterance(gap.toLong(), TextToSpeech.QUEUE_ADD, "$gen:$lastK:p$j")
+                }
             }
             spoke = true
             lastSpoken = lastK
         }
-        if (natural) t.setSpeechRate(rate)
+        if (natural && nv == null) t.setSpeechRate(rate)
         if (first && !spoke) finished()
     }
 
@@ -778,6 +797,8 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
         tts?.stop()
         tts?.shutdown()
         tts = null
+        neural?.shutdown(); neural = null
+        NeuralVoices.release()
         session.release()
         releaseWake()
         abandonFocus()

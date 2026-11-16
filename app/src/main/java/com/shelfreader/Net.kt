@@ -9,7 +9,7 @@ object Net {
     private const val UA = "ShelfReader/1.0 (Android ebook reader)"
 
     /** Opens a connection, following redirects across http/https, and fails on non-2xx. */
-    fun open(url: String): HttpURLConnection {
+    fun open(url: String, headers: Map<String, String> = emptyMap()): HttpURLConnection {
         var current = url
         var redirects = 0
         while (true) {
@@ -18,6 +18,8 @@ object Net {
             c.connectTimeout = 20000
             c.readTimeout = 60000
             c.setRequestProperty("User-Agent", UA)
+            // headers (like a GitHub token) only go to the first host, never to where it redirects
+            if (redirects == 0) for ((k, v) in headers) c.setRequestProperty(k, v)
             val code = c.responseCode
             if (code in 300..399) {
                 val loc = c.getHeaderField("Location") ?: throw Exception("Bad redirect")
@@ -34,8 +36,8 @@ object Net {
         }
     }
 
-    fun get(url: String): String {
-        val c = open(url)
+    fun get(url: String, headers: Map<String, String> = emptyMap()): String {
+        val c = open(url, headers)
         try {
             return c.inputStream.use { it.readBytes().toString(Charsets.UTF_8) }
         } finally {
@@ -43,8 +45,8 @@ object Net {
         }
     }
 
-    fun download(url: String, dest: File, progress: (Long, Long) -> Unit) {
-        val c = open(url)
+    fun download(url: String, dest: File, headers: Map<String, String> = emptyMap(), progress: (Long, Long) -> Unit) {
+        val c = open(url, headers)
         val total = c.contentLengthLong
         val tmp = File(dest.path + ".part")
         try {

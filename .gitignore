@@ -3,3 +3,7 @@ build/
 local.properties
 *.apk
 .idea/
+
+# fetched by CI (sherpa-onnx runtime for natural voices)
+app/src/main/jniLibs/
+app/src/main/java/com/k2fsa/

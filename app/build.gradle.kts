@@ -52,4 +52,6 @@ android {
 
 dependencies {
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
+    // unpacks the downloaded voice models (.tar.bz2)
+    implementation("org.apache.commons:commons-compress:1.27.1")
 }

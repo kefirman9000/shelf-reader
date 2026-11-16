@@ -490,6 +490,7 @@ class MainActivity : Activity() {
         add(settingRow("📥", "Restore from backup", "Bring back a backup file") { restoreLibrary() })
         add(sectionTitle("App"))
         add(settingRow("⬆", "Check for updates", "You have build ${Updater.currentBuild(this)}") { checkUpdates(true) })
+        add(settingRow("🔑", "GitHub token for updates", if (Settings.updateToken(this) != null) "Saved · updates work while the repository is private" else "Needed while the repository is private") { tokenDialog() })
         settingsPane.removeAllViews()
         settingsPane.addView(col)
     }
@@ -887,7 +888,7 @@ class MainActivity : Activity() {
         if (manual) toast("Checking GitHub for updates…")
         pool.execute {
             try {
-                val r = Updater.latest()
+                val r = Updater.latest(this)
                 val cur = Updater.currentBuild(this)
                 Settings.setLastUpdateCheck(this, System.currentTimeMillis())
                 runOnUiThread {
@@ -904,10 +905,38 @@ class MainActivity : Activity() {
                 }
             } catch (t: Throwable) {
                 if (manual) runOnUiThread {
-                    toast("Couldn't check for updates (${t.message}). The GitHub repo needs to be public for this to work.")
+                    AlertDialog.Builder(this).setTitle("Couldn't check for updates").setMessage(t.message ?: "Unknown error")
+                        .setPositiveButton("Add a token…") { _, _ -> tokenDialog() }
+                        .setNegativeButton("Close", null).show()
                 }
             }
         }
+    }
+
+    /** Paste a read-only GitHub token so the app can see new builds while the repository is private. */
+    private fun tokenDialog() {
+        val box = EditText(this).apply {
+            hint = if (Settings.updateToken(this@MainActivity) != null) "A token is saved. Paste a new one to replace it" else "github_pat_…"
+            setSingleLine(); inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+        }
+        val info = TextView(this).apply {
+            textSize = 14f
+            text = "While the GitHub repository is private, GitHub only shares new builds with your account.\n\n" +
+                "1. On GitHub: Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token.\n" +
+                "2. Repository access: Only select repositories → shelf-reader.\n" +
+                "3. Permissions: Contents → Read-only. Generate, copy, paste below.\n\nIt stays on this phone. (If the repository is public, no token is needed.)"
+        }
+        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(8), dp(20), 0); addView(info); addView(box) }
+        val dlg = AlertDialog.Builder(this).setTitle("Updates from a private repository").setView(android.widget.ScrollView(this).apply { addView(col) })
+            .setPositiveButton("Save & check") { _, _ ->
+                val t = box.text.toString().trim()
+                if (t.isNotEmpty() && !Regex("^(github_pat_|ghp_)[A-Za-z0-9_]{20,}$").matches(t)) { toast("That doesn't look like a GitHub token (it starts with github_pat_ or ghp_)."); return@setPositiveButton }
+                if (t.isNotEmpty()) Settings.setUpdateToken(this, t)
+                checkUpdates(true)
+            }
+            .setNegativeButton("Cancel", null)
+        if (Settings.updateToken(this) != null) dlg.setNeutralButton("Remove token") { _, _ -> Settings.setUpdateToken(this, null); toast("Token removed") }
+        dlg.show()
     }
 
     private fun installUpdate(r: Updater.Release) {
@@ -916,7 +945,9 @@ class MainActivity : Activity() {
             try {
                 val f = File(cacheDir, "update.apk")
                 f.delete()
-                Net.download(r.url, f) { _, _ -> }
+                // with a token, download through GitHub's API (works for private repositories)
+                if (Settings.updateToken(this) != null && r.apiUrl.isNotEmpty()) Net.download(r.apiUrl, f, Updater.headers(this, asset = true)) { _, _ -> }
+                else Net.download(r.url, f) { _, _ -> }
                 runOnUiThread { toast("Installing — confirm on the next screen.") }
                 Updater.install(this, f)
             } catch (t: Throwable) {

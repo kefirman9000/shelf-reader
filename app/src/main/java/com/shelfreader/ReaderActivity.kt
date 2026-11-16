@@ -886,10 +886,25 @@ class ReaderActivity : Activity(), BookPageView.Host {
         val quote = segText.take(400)
         val text = Speaker(this).spoken(quote) ?: quote
         toast("Making the clip…")
-        val engine = TextToSpeech(this, null)
         val dir = java.io.File(filesDir, "clips/${book.id}").apply { mkdirs() }
         val name = "clip-${System.currentTimeMillis()}.wav"
         val out = java.io.File(dir, name)
+        val nv = Settings.voiceFor(this, book.id)
+        if (NeuralVoices.isNeural(nv)) {
+            Thread {
+                val r = try { NeuralVoices.generate(this, nv!!, text, Settings.rateFor(this, book.id)) } catch (t: Throwable) { null }
+                runOnUiThread {
+                    if (r == null) { toast("Couldn't make the clip."); return@runOnUiThread }
+                    NeuralVoices.writeWav(out, r.first, r.second)
+                    val list = Library.notes(this, book.id)
+                    list += Note(p, "", System.currentTimeMillis(), "clip", 0, 0, "yellow", quote, name)
+                    Library.saveNotes(this, book.id, list); reloadNotes()
+                    toast("Saved the clip with a bookmark. Find it in Bookmarks & notes.")
+                }
+            }.start()
+            return
+        }
+        val engine = TextToSpeech(this, null)
         engine.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
             override fun onStart(id: String?) {}
             override fun onDone(id: String?) {
@@ -1093,6 +1108,92 @@ class ReaderActivity : Activity(), BookPageView.Host {
 
     // ---------- voices ----------
 
+    // ---------- natural voices (Kokoro / Piper on the phone) ----------
+    private fun neuralPicker() {
+        val wasPlaying = isPlaying()
+        val rows = ArrayList<SheetRow?>()
+        val cur = Settings.voiceFor(this, book.id)
+        for (m in NeuralVoices.MODELS) {
+            val have = NeuralVoices.installed(this, m)
+            if (m.voices.size > 1) {
+                rows += SheetRow(if (have) "🌟" else "⬇", m.title, if (have) "Downloaded · ${m.voices.size} voices" else "${m.voices.size} voices · one download of about ${m.sizeMb} MB") {
+                    if (have) kokoroVoices(m, wasPlaying) else downloadModel(m) { kokoroVoices(m, wasPlaying) }
+                }
+            } else {
+                val (sid, name) = m.voices[0]
+                val key = NeuralVoices.key(m, sid)
+                rows += SheetRow(if (have) (if (key == cur) "✅" else "🎙") else "⬇", name, if (have) "Downloaded · tap to use" else "Download about ${m.sizeMb} MB") {
+                    if (have) useNeural(key, wasPlaying) else downloadModel(m) { useNeural(key, wasPlaying) }
+                }
+            }
+        }
+        rows += null
+        rows += SheetRow("🗑", "Remove downloaded voices…", "Free up space") { removeVoices() }
+        sheet("Natural voices run on this phone, even offline. Kokoro sounds the most human. Download once, then pick a voice.", rows)
+    }
+
+    private fun kokoroVoices(m: NeuralVoices.Model, wasPlaying: Boolean) {
+        val cur = Settings.voiceFor(this, book.id)
+        sheet("${m.title}: tap ▶ to hear, then use", m.voices.map { (sid, name) ->
+            val key = NeuralVoices.key(m, sid)
+            SheetRow(if (key == cur) "✅" else "🎙", name, "Tap to hear it and choose") { previewNeural(key) { useNeural(key, wasPlaying) } }
+        })
+    }
+
+    private fun previewNeural(key: String, then: () -> Unit) {
+        toast("Getting the voice ready…")
+        Thread {
+            val r = try { NeuralVoices.generate(this, key, "Hello! This is how I would sound reading ${book.title}.", Settings.rateFor(this, book.id)) } catch (t: Throwable) { null }
+            runOnUiThread {
+                if (r == null) { toast("Couldn't play this voice."); return@runOnUiThread }
+                NeuralVoices.playOnce(r.first, r.second)
+                AlertDialog.Builder(this).setTitle(NeuralVoices.label(key)).setMessage("Use this voice for this book?")
+                    .setPositiveButton("Use it") { _, _ -> then() }
+                    .setNeutralButton("Hear again") { _, _ -> previewNeural(key, then) }
+                    .setNegativeButton("Back", null).show()
+            }
+        }.start()
+    }
+
+    private fun useNeural(key: String, wasPlaying: Boolean) {
+        Settings.setBookVoice(this, book.id, key)
+        TtsService.instance?.applySettings(true)
+        toast("Using ${NeuralVoices.label(key)}" + if (!wasPlaying) ". Press ▶ to listen." else "")
+    }
+
+    private fun downloadModel(m: NeuralVoices.Model, then: () -> Unit) {
+        AlertDialog.Builder(this).setTitle("Download ${m.title}?")
+            .setMessage("About ${m.sizeMb} MB, once. Wi-Fi is a good idea. After that it works without internet.")
+            .setPositiveButton("Download") { _, _ ->
+                val bar = android.widget.ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply { max = 100 }
+                val label = TextView(this).apply { text = "Starting…"; setPadding(0, dp(8), 0, 0) }
+                val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(12), dp(20), 0); addView(bar); addView(label) }
+                val dlg = AlertDialog.Builder(this).setTitle("Downloading ${m.title}").setView(col).setCancelable(false).show()
+                Thread {
+                    try {
+                        var lastPct = -1
+                        NeuralVoices.download(this, m) { done, total ->
+                            val pct = if (total > 0) (done * 100 / total).toInt() else 0
+                            if (pct != lastPct) { lastPct = pct; runOnUiThread { bar.progress = pct; label.text = "${done / 1_000_000} of ${maxOf(total, done) / 1_000_000} MB" } }
+                        }
+                        runOnUiThread { dlg.dismiss(); toast("${m.title} is ready."); then() }
+                    } catch (t: Throwable) {
+                        runOnUiThread { dlg.dismiss(); toast("Download failed: ${t.message}") }
+                    }
+                }.start()
+                label.text = "Downloading… (unpacking takes a moment at the end)"
+            }
+            .setNegativeButton("Cancel", null).show()
+    }
+
+    private fun removeVoices() {
+        val have = NeuralVoices.MODELS.filter { NeuralVoices.installed(this, it) }
+        if (have.isEmpty()) { toast("No natural voices downloaded."); return }
+        AlertDialog.Builder(this).setTitle("Remove which voice?").setItems(have.map { "${it.title} (${it.sizeMb} MB)" }.toTypedArray()) { _, w ->
+            NeuralVoices.release(); NeuralVoices.remove(this, have[w]); toast("Removed ${have[w].title}")
+        }.show()
+    }
+
     private fun pickVoice() {
         // A separate engine is used for listing and previewing, so previews don't disturb playback.
         val p = probe
@@ -1123,21 +1224,25 @@ class ReaderActivity : Activity(), BookPageView.Host {
                 !(it.features?.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) ?: false)
         }
         val choices = ArrayList<VoiceChoice>()
+        choices += VoiceChoice(null, "🌟 Natural voices on this phone (Kokoro, Piper)…" + (NeuralVoices.label(Settings.voiceFor(this, book.id))?.let { "  ✓ $it" } ?: ""))
         choices += VoiceChoice(null, "Phone's default voice")
         choices += VoiceNames.friendly(usable).map { VoiceChoice(it.first, it.second) }
         val chosen = Settings.voiceFor(this, book.id)
-        var picked = choices.indexOfFirst { it.voice?.name == chosen }.let { if (it < 0) 0 else it }
+        var picked = if (NeuralVoices.isNeural(chosen)) 0 else choices.indexOfFirst { it.voice?.name == chosen }.let { if (it < 0) 1 else it }
+        var dialog: AlertDialog? = null
         val wasPlaying = isPlaying()
         if (wasPlaying) startService(Intent(this, TtsService::class.java).setAction(TtsService.ACTION_PAUSE))
 
         AlertDialog.Builder(this)
             .setTitle("Voice for this book. Tap to hear it.")
             .setSingleChoiceItems(choices.map { it.label }.toTypedArray(), picked) { _, w ->
+                if (w == 0) { engine.stop(); dialog?.dismiss(); neuralPicker(); return@setSingleChoiceItems }
                 picked = w
                 preview(engine, choices[w].voice)
             }
             .setPositiveButton("Use this voice") { _, _ ->
                 engine.stop()
+                if (picked == 0) return@setPositiveButton
                 Settings.setBookVoice(this, book.id, choices[picked].voice?.name)
                 TtsService.instance?.applySettings(false)
                 if (wasPlaying) startService(Intent(this, TtsService::class.java).setAction(TtsService.ACTION_TOGGLE))
@@ -1145,7 +1250,7 @@ class ReaderActivity : Activity(), BookPageView.Host {
             }
             .setNeutralButton("Get more voices…") { _, _ -> engine.stop(); openTtsSettings() }
             .setNegativeButton("Cancel") { _, _ -> engine.stop() }
-            .show()
+            .show().also { dialog = it }
     }
 
     private fun preview(engine: TextToSpeech, v: Voice?) {

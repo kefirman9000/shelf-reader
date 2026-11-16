@@ -13,16 +13,33 @@ import java.io.File
 object Updater {
     const val REPO = "kefirman9000/shelf-reader"
 
-    data class Release(val build: Int, val url: String, val notes: String)
+    data class Release(val build: Int, val url: String, val notes: String, val apiUrl: String = "")
 
-    fun latest(): Release? {
-        val j = JSONObject(Net.get("https://api.github.com/repos/$REPO/releases/latest"))
+    /** Headers for GitHub: a read-only token lets the app see releases while the repository is private. */
+    fun headers(ctx: Context, asset: Boolean = false): Map<String, String> {
+        val h = HashMap<String, String>()
+        h["Accept"] = if (asset) "application/octet-stream" else "application/vnd.github+json"
+        Settings.updateToken(ctx)?.let { h["Authorization"] = "Bearer $it" }
+        return h
+    }
+
+    fun latest(ctx: Context): Release? {
+        val j = try { JSONObject(Net.get("https://api.github.com/repos/$REPO/releases/latest", headers(ctx))) }
+        catch (e: Exception) {
+            val m = e.message ?: ""
+            throw Exception(when {
+                "404" in m && Settings.updateToken(ctx) == null -> "GitHub doesn't share updates from a private repository. Add a read-only GitHub token in Settings → Check for updates."
+                "404" in m -> "GitHub found no releases with this token. Check it can read the shelf-reader repository."
+                "401" in m || "403" in m -> "GitHub rejected the token. Make a new read-only one."
+                else -> "Couldn't reach GitHub ($m)."
+            })
+        }
         val build = j.optString("tag_name").removePrefix("build-").toIntOrNull() ?: return null
         val assets = j.optJSONArray("assets") ?: return null
         for (i in 0 until assets.length()) {
             val a = assets.getJSONObject(i)
             if (a.optString("name").endsWith(".apk")) {
-                return Release(build, a.getString("browser_download_url"), j.optString("body"))
+                return Release(build, a.getString("browser_download_url"), j.optString("body"), a.optString("url"))
             }
         }
         return null

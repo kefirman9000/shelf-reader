@@ -295,6 +295,9 @@ object Settings {
 
     fun skipClutter(ctx: Context) = p(ctx).getBoolean("skipClutter", true)
     /** Join lines that a scanned or converted book broke in the middle of a sentence. */
+    /** Read-only GitHub token so updates work while the repository is private. */
+    fun updateToken(ctx: Context): String? = p(ctx).getString("updateToken", null)?.takeIf { it.isNotBlank() }
+    fun setUpdateToken(ctx: Context, t: String?) = p(ctx).edit().putString("updateToken", t?.trim()).apply()
     fun fixBrokenLines(ctx: Context) = p(ctx).getBoolean("fixBrokenLines", true)
     fun setFixBrokenLines(ctx: Context, v: Boolean) = p(ctx).edit().putBoolean("fixBrokenLines", v).apply()
     fun naturalPauses(ctx: Context) = p(ctx).getBoolean("naturalPauses", true)
