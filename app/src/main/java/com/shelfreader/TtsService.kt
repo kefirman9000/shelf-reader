@@ -165,6 +165,7 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
 
     override fun onCreate() {
         super.onCreate()
+        CrashReport.install(this)
         instance = this
         main.postDelayed(statsTick, 30_000)
         audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -798,8 +799,8 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
         tts?.shutdown()
         tts = null
         neural?.shutdown(); neural = null
-        Thread { try { NeuralVoices.release() } catch (_: Throwable) {} }.start()   // give the memory back
-        NeuralVoices.release()
+        // give the memory back, off the main thread: it waits for any sentence still being made
+        Thread { try { NeuralVoices.release() } catch (_: Throwable) {} }.start()
         session.release()
         releaseWake()
         abandonFocus()

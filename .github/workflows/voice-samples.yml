@@ -1,0 +1,34 @@
+name: Voice samples
+
+# Makes a short sample of every natural phone voice and saves them to the "voice-samples" branch,
+# so the app can play a voice before you download it. Runs when the voice list or this file changes.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'app/src/main/java/com/shelfreader/NeuralVoices.kt'
+      - 'tools/make_voice_samples.py'
+      - '.github/workflows/voice-samples.yml'
+
+jobs:
+  samples:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - name: Tools
+        run: |
+          pip install sherpa-onnx==1.12.14
+          command -v ffmpeg || (sudo apt-get update && sudo apt-get install -y ffmpeg)
+      - name: Make samples
+        run: python3 tools/make_voice_samples.py out
+      - name: Save to the voice-samples branch
+        run: |
+          cd out && git init -q -b voice-samples
+          git config user.name github-actions && git config user.email github-actions@users.noreply.github.com
+          git add -A && git commit -qm "Voice samples (run ${{ github.run_number }})"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" voice-samples

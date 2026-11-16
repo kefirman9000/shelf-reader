@@ -95,12 +95,12 @@ Your book never leaves your device, except when you choose a premium voice. That
 
 ## Natural voices on the phone
 
-Tap **🗣 Voice → 🌟 Natural voices on this phone** in the player to get much more natural voices that run on the phone itself, even offline:
+Tap **🗣 Voice** in the player. One screen lists every voice: natural voices that run on the phone itself (even offline) and the phone's own Google voices:
 
 - **Kokoro** (about 100 MB, one download; the compact build that runs smoothly on phones) has 11 very natural English voices, American and British, men and women.
 - **Piper** (about 64 MB each) has clear voices in English, German, Spanish, French, Italian and Portuguese.
 
-Tap a voice to hear it, then choose **Use it**. Each book can have its own voice. You can remove downloaded voices from the same screen to free up space. These voices are powered by [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) (Apache-2.0), which the build fetches at a pinned version.
+Tap **▶** on any voice to hear it, even before downloading (a short ready-made sample; once downloaded it reads a line from your book). Tap **Use** (or **Get & use**) to pick it. Downloads show their progress in the list and keep going if you close the screen. Each book can have its own voice, and you can remove downloaded voices from the same screen. If the app ever closes unexpectedly, it offers to send a short report the next time it opens. These voices are powered by [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) (Apache-2.0), which the build fetches at a pinned version.
 
 **Updates while this repository is private:** open **Settings → GitHub token for updates** on the phone and paste a read-only token. The app shows the steps for making one. After that, **Check for updates** works.
 

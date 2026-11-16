@@ -1,0 +1,59 @@
+package com.shelfreader
+
+import android.content.Context
+import android.os.Handler
+import android.os.Looper
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CopyOnWriteArraySet
+
+/**
+ * Natural-voice downloads that belong to the app, not to a screen: they keep going if the screen turns,
+ * the voice list is closed or you leave the book, and anything showing progress just listens in.
+ * (Before, a finished download tried to update a pop-up that was already gone, which closed the app.)
+ */
+object VoiceDownloads {
+    class State { @Volatile var done = 0L; @Volatile var total = 0L; @Volatile var unpacking = false }
+
+    private val running = ConcurrentHashMap<String, State>()
+    private val failed = ConcurrentHashMap<String, String>()
+    private val listeners = CopyOnWriteArraySet<() -> Unit>()
+    private val main = Handler(Looper.getMainLooper())
+
+    fun state(id: String): State? = running[id]
+    /** The last failure for a voice, shown once. */
+    fun takeError(id: String): String? = failed.remove(id)
+
+    /** Calls [l] on the main thread whenever a download moves on. Returns a function that stops listening. */
+    fun listen(l: () -> Unit): () -> Unit { listeners += l; return { listeners -= l } }
+    private fun changed() = main.post { for (l in listeners) try { l() } catch (_: Throwable) {} }
+
+    /** Starts downloading [m] (if it isn't already); [then] runs on the main thread once it's ready. */
+    fun start(ctx: Context, m: NeuralVoices.Model, then: (() -> Unit)? = null) {
+        val app = ctx.applicationContext
+        if (NeuralVoices.installed(app, m)) { then?.let { main.post(it) }; return }
+        val st = State()
+        if (running.putIfAbsent(m.id, st) != null) return
+        failed.remove(m.id)
+        changed()
+        Thread({
+            val pm = app.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+            val wake = pm.newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "ShelfReader:voice").apply { setReferenceCounted(false) }
+            try {
+                wake.acquire(15 * 60 * 1000L)
+                NeuralVoices.download(app, m, onUnpack = { st.unpacking = true; changed() }) { d, t -> st.done = d; st.total = t; changed() }
+                running.remove(m.id)
+                main.post {
+                    changed()
+                    app.toast("${m.title} is downloaded.")
+                    try { then?.invoke() } catch (_: Throwable) {}
+                }
+            } catch (t: Throwable) {
+                running.remove(m.id)
+                failed[m.id] = t.message ?: "error"
+                main.post { changed(); app.toast("Couldn't download ${m.title}: ${t.message ?: "error"}. Check your internet and try again.") }
+            } finally {
+                try { if (wake.isHeld) wake.release() } catch (_: Throwable) {}
+            }
+        }, "voice-download").start()
+    }
+}

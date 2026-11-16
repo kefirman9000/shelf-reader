@@ -66,10 +66,11 @@ object NeuralVoices {
     fun installed(ctx: Context, m: Model) = File(dir(ctx, m), ".done").exists()
 
     /** Downloads and unpacks a voice model. progress(done, total) in bytes. Runs on a background thread. */
-    fun download(ctx: Context, m: Model, progress: (Long, Long) -> Unit) {
+    fun download(ctx: Context, m: Model, onUnpack: () -> Unit = {}, progress: (Long, Long) -> Unit) {
         val root = dir(ctx, m).parentFile!!.apply { mkdirs() }
         val tmp = File(root, "${m.id}.tar.bz2")
         Net.download(BASE + m.id + ".tar.bz2", tmp, emptyMap(), progress)
+        onUnpack()
         val target = dir(ctx, m)
         target.deleteRecursively()
         try {
@@ -77,7 +78,7 @@ object NeuralVoices {
                 while (true) {
                     val e = tar.nextEntry ?: break
                     // archives hold one top folder named like the model; strip it and refuse odd paths
-                    val rel = e.name.substringAfter('/', "")
+                    val rel = e.name.removePrefix("./").substringAfter('/', "")
                     if (rel.isEmpty() || rel.contains("..")) continue
                     val out = File(target, rel)
                     if (e.isDirectory) { out.mkdirs(); continue }
@@ -90,7 +91,11 @@ object NeuralVoices {
         } finally { tmp.delete() }
     }
 
-    fun remove(ctx: Context, m: Model) { dir(ctx, m).deleteRecursively() }
+    @Synchronized
+    fun remove(ctx: Context, m: Model) { if (loadedId == m.id) release(); dir(ctx, m).deleteRecursively() }
+
+    /** A pre-made sample of a voice, to hear it before downloading (made by the "Voice samples" workflow). */
+    fun sampleUrl(m: Model, sid: Int) = "https://raw.githubusercontent.com/kefirman9000/shelf-reader/voice-samples/${m.id}-$sid.mp3"
 
     // one loaded model at a time (they're large)
     private var loadedId: String? = null
@@ -106,14 +111,15 @@ object NeuralVoices {
         val mi = android.app.ActivityManager.MemoryInfo().also { am.getMemoryInfo(it) }
         val need = (m.sizeMb * 2L + 60) * 1_000_000L
         if (mi.availMem < need) throw Exception("Not enough free memory for this voice right now. Close some apps and try again, or pick a Piper voice (smaller).")
-        val threads = 2
+        val threads = if (CrashReport.safeVoices(ctx)) 1 else 2
         val model = if (m.kind == "kokoro") OfflineTtsModelConfig(
             kokoro = OfflineTtsKokoroModelConfig(model = "$d/${m.file}", voices = "$d/voices.bin", tokens = "$d/tokens.txt", dataDir = "$d/espeak-ng-data"),
             numThreads = threads, provider = "cpu")
         else OfflineTtsModelConfig(
             vits = OfflineTtsVitsModelConfig(model = "$d/${m.file}", tokens = "$d/tokens.txt", dataDir = "$d/espeak-ng-data"),
             numThreads = threads, provider = "cpu")
-        val t = OfflineTts(config = OfflineTtsConfig(model = model, maxNumSentences = 1))
+        CrashReport.busy(ctx, "load ${m.id}")
+        val t = try { OfflineTts(config = OfflineTtsConfig(model = model, maxNumSentences = 1)) } finally { CrashReport.busy(ctx, null) }
         loaded = t; loadedId = m.id
         return t
     }
@@ -125,15 +131,20 @@ object NeuralVoices {
     @Synchronized
     fun gen(ctx: Context, m: Model, text: String, sid: Int, speed: Float): Pair<FloatArray, Int> {
         val tts = engine(ctx, m)
-        val parts = chunks(text)
+        val parts = chunks(text, if (CrashReport.safeVoices(ctx)) 120 else 220)
         if (parts.isEmpty()) return FloatArray(0) to tts.sampleRate()
-        if (parts.size == 1) { val a = tts.generate(parts[0], sid, speed); return a.samples to a.sampleRate }
-        // long pieces are made in parts and joined with a short breath, so the model never gets more than it can take
-        val out = ArrayList<FloatArray>(); var rate = tts.sampleRate()
-        for (p in parts) { val a = tts.generate(p, sid, speed); rate = a.sampleRate; out += a.samples; out += FloatArray(rate / 12) }
-        val all = FloatArray(out.sumOf { it.size }); var o = 0
-        for (a in out) { System.arraycopy(a, 0, all, o, a.size); o += a.size }
-        return all to rate
+        val sp = speed.coerceIn(0.5f, 2.5f)
+        val s = if (m.voices.any { it.first == sid }) sid else m.voices[0].first
+        CrashReport.busy(ctx, "speak ${m.id}")
+        try {
+            if (parts.size == 1) { val a = tts.generate(parts[0], s, sp); return a.samples to a.sampleRate }
+            // long pieces are made in parts and joined with a short breath, so the model never gets more than it can take
+            val out = ArrayList<FloatArray>(); var rate = tts.sampleRate()
+            for (p in parts) { val a = tts.generate(p, s, sp); rate = a.sampleRate; out += a.samples; out += FloatArray(rate / 12) }
+            val all = FloatArray(out.sumOf { it.size }); var o = 0
+            for (a in out) { System.arraycopy(a, 0, all, o, a.size); o += a.size }
+            return all to rate
+        } finally { CrashReport.busy(ctx, null) }
     }
 
     /** Splits text at commas, semicolons or spaces into parts the model handles safely; drops parts with nothing to say. */
@@ -161,8 +172,19 @@ object NeuralVoices {
         return gen(ctx, m, text, sid, speed)
     }
 
-    /** Plays a short sample (preview). */
+    private var previewTrack: AudioTrack? = null
+    private val previewLock = Any()   // separate from the model lock, so stopping a preview never waits for speech to be made
+
+    /** Stops a preview that's playing. */
+    fun stopPreview() = synchronized(previewLock) {
+        previewTrack?.let { try { it.stop() } catch (_: Throwable) {}; try { it.release() } catch (_: Throwable) {} }
+        previewTrack = null
+    }
+
+    /** Plays a short sample (preview), replacing any that's playing. */
     fun playOnce(samples: FloatArray, rate: Int) {
+        if (samples.isEmpty()) return
+        stopPreview()
         val t = AudioTrack.Builder()
             .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
             .setAudioFormat(AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_FLOAT).setSampleRate(rate).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build())
@@ -170,8 +192,11 @@ object NeuralVoices {
             .setBufferSizeInBytes(maxOf(samples.size * 4, 4096))
             .build()
         t.write(samples, 0, samples.size, AudioTrack.WRITE_BLOCKING)
-        t.play()
-        Thread { Thread.sleep(samples.size * 1000L / rate + 300); try { t.release() } catch (_: Throwable) {} }.start()
+        synchronized(previewLock) { previewTrack = t; t.play() }
+        Thread {
+            Thread.sleep(samples.size * 1000L / rate + 300)
+            synchronized(previewLock) { if (previewTrack === t) { try { t.release() } catch (_: Throwable) {}; previewTrack = null } }
+        }.start()
     }
 
     /** Writes 16-bit mono WAV (for audio clips). */

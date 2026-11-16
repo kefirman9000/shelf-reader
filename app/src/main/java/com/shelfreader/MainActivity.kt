@@ -114,7 +114,9 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        CrashReport.install(this)
         intent?.getStringExtra("selftest_voice")?.let { SelfTest.run(applicationContext, it) }
+        if (intent?.getStringExtra("selftest_voice") == null) CrashReport.check(this)
 
         window.statusBarColor = UiColors.SURFACE
         window.navigationBarColor = UiColors.SURFACE

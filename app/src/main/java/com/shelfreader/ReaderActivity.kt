@@ -166,10 +166,12 @@ class ReaderActivity : Activity(), BookPageView.Host {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        CrashReport.install(this)
         val id = intent.getStringExtra("book")
         val b = id?.let { Library.get(this, it) }
         if (b == null) { finish(); return }
         book = b
+        CrashReport.check(this)
         title = b.title
         val prevOpened = Library.opened(this, b.id)
         Library.markOpened(this, b.id)
@@ -1124,145 +1126,50 @@ class ReaderActivity : Activity(), BookPageView.Host {
 
     // ---------- voices ----------
 
-    // ---------- natural voices (Kokoro / Piper on the phone) ----------
-    private fun neuralPicker() {
-        val wasPlaying = isPlaying()
-        val rows = ArrayList<SheetRow?>()
-        val cur = Settings.voiceFor(this, book.id)
-        for (m in NeuralVoices.MODELS) {
-            val have = NeuralVoices.installed(this, m)
-            if (m.voices.size > 1) {
-                rows += SheetRow(if (have) "🌟" else "⬇", m.title, if (have) "Downloaded · ${m.voices.size} voices" else "${m.voices.size} voices · one download of about ${m.sizeMb} MB") {
-                    if (have) kokoroVoices(m, wasPlaying) else downloadModel(m) { kokoroVoices(m, wasPlaying) }
-                }
-            } else {
-                val (sid, name) = m.voices[0]
-                val key = NeuralVoices.key(m, sid)
-                rows += SheetRow(if (have) (if (key == cur) "✅" else "🎙") else "⬇", name, if (have) "Downloaded · tap to use" else "Download about ${m.sizeMb} MB") {
-                    if (have) useNeural(key, wasPlaying) else downloadModel(m) { useNeural(key, wasPlaying) }
-                }
-            }
-        }
-        rows += null
-        rows += SheetRow("🗑", "Remove downloaded voices…", "Free up space") { removeVoices() }
-        sheet("Natural voices run on this phone, even offline. Kokoro sounds the most human. Download once, then pick a voice.", rows)
-    }
-
-    private fun kokoroVoices(m: NeuralVoices.Model, wasPlaying: Boolean) {
-        val cur = Settings.voiceFor(this, book.id)
-        sheet("${m.title}: tap ▶ to hear, then use", m.voices.map { (sid, name) ->
-            val key = NeuralVoices.key(m, sid)
-            SheetRow(if (key == cur) "✅" else "🎙", name, "Tap to hear it and choose") { previewNeural(key) { useNeural(key, wasPlaying) } }
-        })
-    }
-
-    private fun previewNeural(key: String, then: () -> Unit) {
-        toast("Getting the voice ready…")
-        Thread {
-            val r = try { NeuralVoices.generate(this, key, "Hello! This is how I would sound reading ${book.title}.", Settings.rateFor(this, book.id)) } catch (t: Throwable) { null }
-            runOnUiThread {
-                if (r == null) { toast("Couldn't play this voice."); return@runOnUiThread }
-                NeuralVoices.playOnce(r.first, r.second)
-                AlertDialog.Builder(this).setTitle(NeuralVoices.label(key)).setMessage("Use this voice for this book?")
-                    .setPositiveButton("Use it") { _, _ -> then() }
-                    .setNeutralButton("Hear again") { _, _ -> previewNeural(key, then) }
-                    .setNegativeButton("Back", null).show()
-            }
-        }.start()
-    }
-
-    private fun useNeural(key: String, wasPlaying: Boolean) {
-        Settings.setBookVoice(this, book.id, key)
-        TtsService.instance?.applySettings(true)
-        toast("Using ${NeuralVoices.label(key)}" + if (!wasPlaying) ". Press ▶ to listen." else "")
-    }
-
-    private fun downloadModel(m: NeuralVoices.Model, then: () -> Unit) {
-        AlertDialog.Builder(this).setTitle("Download ${m.title}?")
-            .setMessage("About ${m.sizeMb} MB, once. Wi-Fi is a good idea. After that it works without internet.")
-            .setPositiveButton("Download") { _, _ ->
-                val bar = android.widget.ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply { max = 100 }
-                val label = TextView(this).apply { text = "Starting…"; setPadding(0, dp(8), 0, 0) }
-                val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(12), dp(20), 0); addView(bar); addView(label) }
-                val dlg = AlertDialog.Builder(this).setTitle("Downloading ${m.title}").setView(col).setCancelable(false).show()
-                Thread {
-                    try {
-                        var lastPct = -1
-                        NeuralVoices.download(this, m) { done, total ->
-                            val pct = if (total > 0) (done * 100 / total).toInt() else 0
-                            if (pct != lastPct) { lastPct = pct; runOnUiThread { bar.progress = pct; label.text = "${done / 1_000_000} of ${maxOf(total, done) / 1_000_000} MB" } }
-                        }
-                        runOnUiThread { dlg.dismiss(); toast("${m.title} is ready."); then() }
-                    } catch (t: Throwable) {
-                        runOnUiThread { dlg.dismiss(); toast("Download failed: ${t.message}") }
-                    }
-                }.start()
-                label.text = "Downloading… (unpacking takes a moment at the end)"
-            }
-            .setNegativeButton("Cancel", null).show()
-    }
-
-    private fun removeVoices() {
-        val have = NeuralVoices.MODELS.filter { NeuralVoices.installed(this, it) }
-        if (have.isEmpty()) { toast("No natural voices downloaded."); return }
-        AlertDialog.Builder(this).setTitle("Remove which voice?").setItems(have.map { "${it.title} (${it.sizeMb} MB)" }.toTypedArray()) { _, w ->
-            NeuralVoices.release(); NeuralVoices.remove(this, have[w]); toast("Removed ${have[w].title}")
-        }.show()
-    }
+    // ---------- voices: one screen for natural (Kokoro / Piper) and phone voices ----------
+    private var voicePickerOpen = false
 
     private fun pickVoice() {
-        // A separate engine is used for listing and previewing, so previews don't disturb playback.
+        if (voicePickerOpen) return
+        // A separate engine is used for listing and previewing phone voices, so previews don't disturb playback.
         val p = probe
         if (p != null && probeReady) { showVoices(p); return }
         status.text = "Loading voices…"
         if (p == null) {
             probe = TextToSpeech(this) { st ->
                 runOnUiThread {
-                    if (st == TextToSpeech.SUCCESS) {
-                        probeReady = true
-                        probe?.let { showVoices(it) }
-                    } else {
-                        toast("No text-to-speech engine found. Install “Speech Services by Google”.")
-                    }
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    probeReady = st == TextToSpeech.SUCCESS
+                    showVoices(if (probeReady) probe else null)
                     refresh()
                 }
             }
         }
     }
 
-    private class VoiceChoice(val voice: Voice?, val label: String)
-
-    private fun showVoices(engine: TextToSpeech) {
-        val all: List<Voice> = try { engine.voices?.toList() ?: emptyList() } catch (e: Throwable) { emptyList() }
-        val lang = Locale.getDefault().language
-        val usable = all.filter {
-            it.locale.language == lang &&
-                !(it.features?.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) ?: false)
-        }
-        val chosen = Settings.voiceFor(this, book.id)
+    private fun showVoices(engine: TextToSpeech?) {
+        if (voicePickerOpen || isFinishing || isDestroyed) return
         val wasPlaying = isPlaying()
         if (wasPlaying) startService(Intent(this, TtsService::class.java).setAction(TtsService.ACTION_PAUSE))
-        val rows = ArrayList<SheetRow?>()
-        val natural = NeuralVoices.label(chosen)
-        rows += SheetRow("🌟", "Natural voices (Kokoro, Piper)", natural?.let { "In use: $it" } ?: "Much more human. Run on this phone, even offline") { engine.stop(); neuralPicker() }
-        rows += null
-        fun use(name: String?, label: String) {
-            Settings.setBookVoice(this, book.id, name)
-            TtsService.instance?.applySettings(false)
-            toast("Using $label. Tap another to compare.")
+        voicePickerOpen = true
+        VoicePicker(this, book.id, { sampleSentence() }, engine, { e, v -> preview(e, v) }, { openTtsSettings() }) {
+            voicePickerOpen = false
+            // carry on reading if it was playing before (now with the chosen voice)
+            if (wasPlaying && !isFinishing && !isPlaying()) startService(Intent(this, TtsService::class.java).setAction(TtsService.ACTION_TOGGLE))
+            refresh()
+        }.show()
+    }
+
+    /** A line from where you are in the book, to hear a downloaded voice read it. */
+    private fun sampleSentence(): String {
+        val start = currentPara().coerceIn(0, maxOf(0, paras.size - 1))
+        for (i in start until minOf(paras.size, start + 30)) {
+            val t = paras[i].replace(Regex("\\s+"), " ").trim()
+            if (t.count { it.isLetter() } < 25) continue
+            val end = Regex("[.!?…][”\"’)]?\\s").find(t, 40)?.range?.last ?: -1
+            return (if (end in 40..240) t.substring(0, end + 1) else t.take(200).substringBeforeLast(' ') + "…").trim()
         }
-        rows += SheetRow(if (chosen == null) "✅" else "📱", "Phone's default voice", "Whatever is set in Android's speech settings", stay = true) { engine.stop(); use(null, "the phone's default voice") }
-        for ((v, label) in VoiceNames.friendly(usable)) {
-            val name = label.substringBefore("  (")
-            val where = if (v.isNetworkConnectionRequired) "Google voice · needs internet" else "Google voice · on this phone"
-            val hq = if (v.quality >= Voice.QUALITY_VERY_HIGH) " · ★ high quality" else ""
-            rows += SheetRow(if (v.name == chosen) "✅" else "🔊", name, "$where$hq · tap to hear and use", stay = true) {
-                preview(engine, v); use(v.name, name)
-            }
-        }
-        rows += null
-        rows += SheetRow("⬇", "Get more Google voices", "Opens Android's speech settings") { engine.stop(); openTtsSettings() }
-        sheet("Voice for this book · tap to hear it", rows)
+        return "Hello! This is how I would sound reading ${book.title}."
     }
 
     private fun preview(engine: TextToSpeech, v: Voice?) {
