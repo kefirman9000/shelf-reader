@@ -17,11 +17,15 @@ object SelfTest {
                 val f = java.io.File(Library.dir(ctx), "$id.txt")
                 ctx.assets.open("torture.txt").use { i -> f.outputStream().use { i.copyTo(it) } }
                 if (Library.get(ctx, id) == null) Library.add(ctx, Book(id, "Hard cases", "Test", f.name, "txt", System.currentTimeMillis()))
+                NeuralVoices.parse(voice)?.let { (m, _) ->
+                    if (!NeuralVoices.installed(ctx, m)) { Log.i(TAG, "downloading ${m.id}"); NeuralVoices.download(ctx, m) { _, _ -> } }
+                    Log.i(TAG, "voice ready: ${m.id}")
+                }
                 Settings.setBookRate(ctx, id, 3f)
                 if (voice != null) Settings.setBookVoice(ctx, id, voice)
                 ctx.startForegroundService(android.content.Intent(ctx, TtsService::class.java).setAction(TtsService.ACTION_PLAY).putExtra(TtsService.EXTRA_BOOK, id))
                 var lastSeg = -1; var still = 0; var started2 = false
-                for (tick in 0 until 900) {
+                for (tick in 0 until 1500) {
                     Thread.sleep(1000)
                     val s = TtsService.instance ?: continue
                     val (seg, total, _) = s.testState()
