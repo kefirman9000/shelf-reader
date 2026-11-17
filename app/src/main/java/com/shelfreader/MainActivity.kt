@@ -495,7 +495,11 @@ class MainActivity : Activity() {
         add(settingRow("📥", "Restore from backup", "Bring back a backup file") { restoreLibrary() })
         add(sectionTitle("App"))
         add(settingRow("🐞", "Report a problem", "Stuck, skipping, crashes: makes a report of what the app was doing") { CrashReport.reportProblem(this) })
-        add(settingRow("⬆", "Check for updates", "You have build ${Updater.currentBuild(this)}") { checkUpdates(true) })
+        add(settingRow("⬆", "Check for updates", "You have build ${Updater.currentBuild(this)} · ${if (Settings.betaUpdates(this)) "Beta" else "Stable"} updates") { checkUpdates(true) })
+        add(settingRow("🧪", "Update channel: ${if (Settings.betaUpdates(this)) "Beta" else "Stable"}",
+            if (Settings.betaUpdates(this)) "Every new build straight away (may have new problems). Tap for Stable" else "Only builds that passed every test. Tap for Beta (newest builds first)") {
+            Settings.setBetaUpdates(this, !Settings.betaUpdates(this)); buildSettings()
+        })
         add(settingRow("🔑", "GitHub token for updates", if (Settings.updateToken(this) != null) "Saved · updates work while the repository is private" else "Needed while the repository is private") { tokenDialog() })
         settingsPane.removeAllViews()
         settingsPane.addView(col)

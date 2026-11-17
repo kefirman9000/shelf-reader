@@ -303,6 +303,9 @@ object Settings {
     fun setJustify(ctx: Context, v: Boolean) = p(ctx).edit().putBoolean("justify", v).apply()
     fun compactPlayer(ctx: Context) = p(ctx).getBoolean("compactPlayer", false)
     fun setCompactPlayer(ctx: Context, v: Boolean) = p(ctx).edit().putBoolean("compactPlayer", v).apply()
+    /** Get every new build as soon as it's made (Beta), instead of only builds that passed all tests (Stable). */
+    fun betaUpdates(ctx: Context) = p(ctx).getBoolean("betaUpdates", false)
+    fun setBetaUpdates(ctx: Context, v: Boolean) = p(ctx).edit().putBoolean("betaUpdates", v).apply()
     fun fixBrokenLines(ctx: Context) = p(ctx).getBoolean("fixBrokenLines", true)
     fun setFixBrokenLines(ctx: Context, v: Boolean) = p(ctx).edit().putBoolean("fixBrokenLines", v).apply()
     /** When a book ends, start another one by itself (Up next first, then Want to read, then others). */

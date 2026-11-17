@@ -22,7 +22,7 @@ jobs:
         with: { python-version: '3.12' }
       - name: Tools
         run: |
-          pip install sherpa-onnx==1.12.14
+          pip install 'sherpa-onnx>=1.12.26,<1.13'
           command -v ffmpeg || (sudo apt-get update && sudo apt-get install -y ffmpeg)
       - name: Make samples
         run: python3 tools/make_voice_samples.py out

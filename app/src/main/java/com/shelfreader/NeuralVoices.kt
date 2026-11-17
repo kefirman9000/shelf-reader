@@ -203,8 +203,18 @@ class NeuralSpeaker(
     private val ctx: Context,
     private val onStart: (String) -> Unit,
     private val onDone: (String) -> Unit,
-    private val onError: (String, String) -> Unit
+    private val onError: (String, String) -> Unit,
+    /** Called once when this phone makes the voice's speech slower than it plays (so there will be pauses). */
+    private val onSlow: (Double) -> Unit = {}
 ) {
+    // ---- is the voice keeping up? ----
+    @Volatile private var rtf = 0.0          // time to make ÷ time to play, smoothed; above 1 means falling behind
+    @Volatile private var made = 0
+    @Volatile private var waits = 0          // times a sentence was ready only after the previous one had finished
+    @Volatile private var warned = false
+    /** How fast this phone makes the current voice (1.0 = exactly as fast as it plays); 0 until measured. */
+    val speedRatio get() = rtf
+
     private class Item(val id: String, val text: String?, val silenceMs: Long, val speed: Float, val epoch: Int)
     /** Speech, or a pause ([silenceMs] > 0, made at whatever rate the speaker is already playing). */
     private class Clip(val id: String, val samples: FloatArray, val rate: Int, val epoch: Int, val silenceMs: Long = 0)
@@ -233,7 +243,14 @@ class NeuralSpeaker(
                     val v = voice ?: throw Exception("No voice")
                     val (m, sid) = NeuralVoices.parse(v) ?: throw Exception("Unknown voice")
                     if (!NeuralVoices.installed(ctx, m)) throw Exception("This voice isn't downloaded yet")
+                    val t0 = System.nanoTime()
                     val (samples, rate) = NeuralVoices.gen(ctx, m, it.text, sid, it.speed.coerceIn(0.5f, 2.5f))
+                    val audioS = samples.size.toDouble() / maxOf(1, rate)
+                    if (audioS > 0.8 && made++ > 0) {   // skip the first one: it includes loading the voice
+                        val r = (System.nanoTime() - t0) / 1e9 / audioS
+                        rtf = if (rtf == 0.0) r else rtf * 0.7 + r * 0.3
+                        checkSlow()
+                    }
                     Clip(it.id, samples, rate, it.epoch)
                 }
                 while (alive && it.epoch == epoch.get() && !ready.offer(clip, 200, java.util.concurrent.TimeUnit.MILLISECONDS)) { /* wait for room */ }
@@ -245,7 +262,10 @@ class NeuralSpeaker(
 
     private val player = Thread({
         while (alive) {
+            val w0 = System.currentTimeMillis()
             val c = try { ready.take() } catch (_: InterruptedException) { continue }
+            // waited a noticeable time for speech while the queue was flowing: the listener heard a gap
+            if (c.samples.isNotEmpty() && c.epoch == epoch.get() && System.currentTimeMillis() - w0 > 600 && todo.isNotEmpty()) { waits++; checkSlow() }
             if (c.epoch != epoch.get() || (c.samples.isEmpty() && c.silenceMs <= 0)) { if (c.epoch == epoch.get()) main.post { if (c.epoch == epoch.get()) { onStart(c.id); onDone(c.id) } }; continue }
             main.post { if (c.epoch == epoch.get()) onStart(c.id) }
             // Android can invalidate an audio track at any time (audio server restart, output change, …).
@@ -264,6 +284,13 @@ class NeuralSpeaker(
         // only this thread writes to the track, so only it releases it (releasing mid-write crashes)
         dropTrack()
     }, "neural-player")
+
+    private fun checkSlow() {
+        if (warned || made < 4 || rtf < 0.95 || waits < 2) return
+        warned = true
+        val r = rtf
+        main.post { onSlow(r) }
+    }
 
     /** Plays one clip and returns once it has actually been heard (or was cut short by stop()). */
     private fun playClip(c: Clip) {

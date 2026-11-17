@@ -18,7 +18,7 @@ const REPO = 'kefirman9000/shelf-reader';
 function startServer(opts = {}) {
   const store = new Store(opts.dataDir || path.join(__dirname, 'testdata'));
   const updates = opts.updates || null;
-  if (updates) { updates.setToken(store.settings().updateToken || ''); updates.setAuto(store.settings().autoUpdate !== false); }
+  if (updates) { updates.setToken(store.settings().updateToken || ''); updates.setAuto(store.settings().autoUpdate !== false); updates.setBeta(!!store.settings().betaUpdates); }
   const version = opts.version || '1.0.0';
   let port = opts.port || 47321;
 
@@ -140,6 +140,7 @@ function startServer(opts = {}) {
       const patch = await json(req);
       delete patch.cloud; delete patch.updateToken;
       if (updates && 'autoUpdate' in patch) updates.setAuto(patch.autoUpdate !== false);
+      if (updates && 'betaUpdates' in patch) updates.setBeta(!!patch.betaUpdates);
       return send(res, 200, pub(store.setSettings(patch)));
     }
 

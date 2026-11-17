@@ -23,8 +23,18 @@ object Updater {
         return h
     }
 
+    /**
+     * The newest release for this phone's channel. Stable: the newest build that passed every test (GitHub's
+     * "latest" release). Beta: the newest build of all, published as soon as it's built, before the long tests finish.
+     */
     fun latest(ctx: Context): Release? {
-        val j = try { JSONObject(Net.get("https://api.github.com/repos/$REPO/releases/latest", headers(ctx))) }
+        val j = try {
+            if (Settings.betaUpdates(ctx)) {
+                val list = org.json.JSONArray(Net.get("https://api.github.com/repos/$REPO/releases?per_page=10", headers(ctx)))
+                (0 until list.length()).map { list.getJSONObject(it) }.firstOrNull { !it.optBoolean("draft") && hasApk(it) }
+                    ?: throw Exception("404 no releases")
+            } else JSONObject(Net.get("https://api.github.com/repos/$REPO/releases/latest", headers(ctx)))
+        }
         catch (e: Exception) {
             val m = e.message ?: ""
             throw Exception(when {
@@ -43,6 +53,11 @@ object Updater {
             }
         }
         return null
+    }
+
+    private fun hasApk(j: JSONObject): Boolean {
+        val a = j.optJSONArray("assets") ?: return false
+        return (0 until a.length()).any { a.getJSONObject(it).optString("name").endsWith(".apk") }
     }
 
     fun currentBuild(ctx: Context): Long =

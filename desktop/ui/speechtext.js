@@ -80,7 +80,7 @@
   const ABBR = [
     [/\bMr\.(?=\s)/g, 'Mister'], [/\bMrs\.(?=\s)/g, 'Missus'], [/\bMs\.(?=\s)/g, 'Miz'],
     [/\bDr\.(?=\s+[A-Z])/g, 'Doctor'], [/\bDr\.(?=[\s,;]|$)/g, 'Drive'],
-    [/\bSt\.(?=\s+[A-Z])/g, 'Saint'], [/(?<=[a-z]\s?[A-Z][a-z]+\s)St\.(?=[\s,;.]|$)/g, 'Street'], [/\bSt\.(?=[,;]|$)/g, 'Street'],
+    [/\bSt\.(?=\s+[A-Z])/g, 'Saint'], [/\bSt\.(?=[,;]|\s+[a-z]|$)/g, 'Street'],
     [/\bMt\.(?=\s+[A-Z])/g, 'Mount'], [/\bFt\.(?=\s+[A-Z])/g, 'Fort'], [/\bCapt\.(?=\s)/g, 'Captain'], [/\bGen\.(?=\s+[A-Z])/g, 'General'],
     [/\bCol\.(?=\s+[A-Z])/g, 'Colonel'], [/\bLt\.(?=\s+[A-Z])/g, 'Lieutenant'], [/\bSgt\.(?=\s+[A-Z])/g, 'Sergeant'], [/\bProf\.(?=\s+[A-Z])/g, 'Professor'],
     [/\bRev\.(?=\s+[A-Z])/g, 'Reverend'], [/\bGov\.(?=\s+[A-Z])/g, 'Governor'], [/\bSen\.(?=\s+[A-Z])/g, 'Senator'], [/\bRep\.(?=\s+[A-Z])/g, 'Representative'],

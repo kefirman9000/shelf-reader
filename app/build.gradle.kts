@@ -19,22 +19,28 @@ android {
     }
 
     // A fixed key so new builds install over old ones without losing your library.
+    // On GitHub it comes from the repository's secrets (SHELF_KEYSTORE / SHELF_KEYSTORE_PASSWORD, set up by the
+    // build workflow). Without them, the older key file in this folder is used, or Android's own debug key.
+    val ksPath = System.getenv("SHELF_KEYSTORE")?.takeIf { it.isNotBlank() }
+    val ksFile = if (ksPath != null) file(ksPath) else file("shelf.keystore")
+    val ksPass = if (ksPath != null) System.getenv("SHELF_KEYSTORE_PASSWORD") ?: "" else "shelfreader"
+    val ksAlias = System.getenv("SHELF_KEY_ALIAS")?.takeIf { it.isNotBlank() } ?: "shelf"
     signingConfigs {
-        create("shared") {
-            storeFile = file("shelf.keystore")
-            storePassword = "shelfreader"
-            keyAlias = "shelf"
-            keyPassword = "shelfreader"
+        if (ksFile.exists()) create("shared") {
+            storeFile = ksFile
+            storePassword = ksPass
+            keyAlias = ksAlias
+            keyPassword = ksPass
         }
     }
 
     buildTypes {
         getByName("debug") {
-            signingConfig = signingConfigs.getByName("shared")
+            if (ksFile.exists()) signingConfig = signingConfigs.getByName("shared")
         }
         getByName("release") {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("shared")
+            signingConfig = if (ksFile.exists()) signingConfigs.getByName("shared") else signingConfigs.getByName("debug")
         }
     }
 

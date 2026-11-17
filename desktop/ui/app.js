@@ -1367,6 +1367,7 @@ async function renderUpdateBox() {
       ${u.status === 'portable' ? '<button id="uRelease">Open the download page</button>' : '<button id="uCheck">Check now</button>'}
     </div>
     ${u.status !== 'portable' && u.status !== 'dev' ? `<label class="check"><input type="checkbox" id="uAuto" ${S.settings.autoUpdate !== false ? 'checked' : ''}> Download updates automatically (they install the next time you restart Shelf Reader)</label>
+    <label class="check"><input type="checkbox" id="uBeta" ${S.settings.betaUpdates ? 'checked' : ''}> Beta updates: get every new build straight away. Off (Stable): only builds that passed every test.</label>
     <details ${u.status === 'error' && !u.hasToken ? 'open' : ''}><summary>Private repository? Add a GitHub token</summary>
       <p class="muted">While the GitHub repository is private, GitHub only shares updates with your account. Make a read-only token: on GitHub open <b>Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token</b>, choose <b>Only select repositories → shelf-reader</b>, set <b>Contents</b> to <b>Read-only</b>, and paste it here. It stays on this PC. (If you make the repository public, no token is needed.)</p>
       <div class="setrow"><input id="uToken" type="password" placeholder="${u.hasToken ? 'A token is saved. Paste a new one to replace it' : 'github_pat_…'}" style="flex:1"><button id="uTokenSave">Save</button>${u.hasToken ? '<button id="uTokenDel" class="danger">Remove</button>' : ''}</div>
@@ -1382,6 +1383,7 @@ async function renderUpdateBox() {
   });
   on('#uTokenDel', async () => { await api('/api/update/token', { method: 'POST', json: { token: '' } }).catch(() => {}); renderUpdateBox(); });
   const a = $('#uAuto'); if (a) a.onchange = () => saveSettings({ autoUpdate: a.checked });
+  const bt = $('#uBeta'); if (bt) bt.onchange = async () => { await saveSettings({ betaUpdates: bt.checked }); api('/api/update/check', { method: 'POST' }).then(() => renderUpdateBox && renderUpdateBox()).catch(() => {}); };
   if (u.status === 'checking' || u.status === 'downloading') setTimeout(renderUpdateBox, 1500);
 }
 async function installUpdate() {

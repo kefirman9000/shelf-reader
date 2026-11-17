@@ -20,7 +20,8 @@ function createUpdater() {
     checkedAt: 0,
     installed: false,
     hasToken: false,
-    auto: true
+    auto: true,
+    beta: false             // Beta: every new build; Stable: only builds that passed every test
   };
   let updater = null;
   let token = '';
@@ -38,7 +39,7 @@ function createUpdater() {
     updater = autoUpdater;
     updater.autoDownload = state.auto;
     updater.autoInstallOnAppQuit = true;
-    updater.allowPrerelease = false;
+    updater.allowPrerelease = state.beta;
     // The app isn't code-signed, so there's no publisher to check (this also avoids running PowerShell).
     updater.verifyUpdateCodeSignature = async () => null;
     updater.logger = null;
@@ -83,6 +84,7 @@ function createUpdater() {
   return {
     status: () => ({ ...state, hasToken: !!token }),
     setToken(t) { token = String(t || '').trim(); state.hasToken = !!token; configure(); },
+    setBeta(on) { state.beta = !!on; if (updater) updater.allowPrerelease = state.beta; },
     setAuto(on) { state.auto = on !== false; if (updater) updater.autoDownload = state.auto; },
     check,
     async download() { if (state.status === 'available') { state.status = 'downloading'; try { await get().downloadUpdate(); } catch (e) { state.status = 'error'; state.error = friendly(e); } } return state; },

@@ -84,7 +84,8 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
     private fun neuralSpeaker(): NeuralSpeaker = neural ?: NeuralSpeaker(this,
         onStart = { id -> progressListener.onStart(id) },
         onDone = { id -> progressListener.onDone(id) },
-        onError = { id, msg -> CrashReport.note(this, "natural voice error on $id: $msg"); lastVoiceError = msg; @Suppress("DEPRECATION") progressListener.onError(id) }
+        onError = { id, msg -> CrashReport.note(this, "natural voice error on $id: $msg"); lastVoiceError = msg; @Suppress("DEPRECATION") progressListener.onError(id) },
+        onSlow = { r -> slowVoice(r) }
     ).also { neural = it }
     private var ready = false
     private var speaker: Speaker? = null
@@ -130,6 +131,19 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
         }
     }
 
+    /** The natural voice can't keep up on this phone: say so once per voice, with what helps. */
+    private fun slowVoice(r: Double) {
+        val v = Settings.voiceFor(this, bookId) ?: return
+        CrashReport.note(this, "natural voice too slow: ${"%.2f".format(r)}× real time ($v)")
+        val p = getSharedPreferences("slow_voices", MODE_PRIVATE)
+        p.edit().putFloat(v, r.toFloat()).apply()
+        if (p.getBoolean("warned:$v", false)) return
+        p.edit().putBoolean("warned:$v", true).apply()
+        val piper = NeuralVoices.parse(v)?.first?.kind == "kokoro"
+        toast("This voice is a little slow on this phone, so you may hear pauses between sentences. " +
+            (if (piper) "A Piper voice runs much faster, or try a lower speed." else "A lower speed, or the phone's own voices, will run smoothly."))
+    }
+
     /** What the player is doing right now (for problem reports). */
     fun diagnostics(): String {
         val v = Settings.voiceFor(this, bookId)
@@ -139,6 +153,7 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
         sb.append("Playing: $playing, voice ready: $ready, queued up to ${queuedUpTo + 1}, last queued ${lastSpoken + 1}\n")
         sb.append("Voice: ${NeuralVoices.label(v) ?: v ?: "phone default"} · engine ${tts?.defaultEngine ?: "-"} · speed ${Settings.rateFor(this, bookId)}\n")
         sb.append("Stalls ${stalls}, errors in a row ${errorsInRow}, last voice error: ${lastVoiceError ?: "-"}\n")
+        neural?.let { if (it.speedRatio > 0) sb.append("Natural voice makes speech at ${"%.2f".format(it.speedRatio)}× the time it takes to play (above 1 = falling behind)\n") }
         for (d in -1..2) {
             val k = segIndex + d
             if (k < 0 || k >= segs.size) continue
