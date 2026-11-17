@@ -47,7 +47,7 @@ private class CoverImage(ctx: Context) : ImageView(ctx) {
     }
 }
 
-private class Cell(
+internal class Cell(
     val shelf: Boolean,
     val root: View,
     val img: ImageView,
@@ -60,50 +60,50 @@ private class Cell(
 class MainActivity : Activity() {
 
     companion object {
-        private val VIEW_NAMES = listOf("Shelf", "Grid", "List")
-        private val SORT_NAMES = listOf("Recent", "Title", "Author", "Progress")
-        private const val WOOD_BG = 0xFF2B1D14.toInt()
+        internal val VIEW_NAMES = listOf("Shelf", "Grid", "List")
+        internal val SORT_NAMES = listOf("Recent", "Title", "Author", "Progress")
+        internal const val WOOD_BG = 0xFF2B1D14.toInt()
     }
 
-    private lateinit var libraryPane: View
-    private lateinit var libraryList: ListView
-    private lateinit var libraryGrid: GridView
-    private lateinit var libraryEmpty: TextView
-    private lateinit var continueBar: View
-    private lateinit var continueText: TextView
-    private lateinit var viewBtn: TextView
-    private lateinit var sortBtn: TextView
-    private lateinit var filterBtn: TextView
-    private var shelfAdapter: ShelfAdapter? = null
-    private var pendingCoverBook: String? = null
-    private lateinit var searchPane: View
-    private lateinit var searchBox: EditText
-    private lateinit var searchStatus: TextView
-    private lateinit var resultsList: ListView
-    private lateinit var tabs: List<LinearLayout>
-    private lateinit var topTitle: TextView
-    private lateinit var settingsPane: android.widget.ScrollView
-    private lateinit var emptyBox: LinearLayout
-    private lateinit var continueCover: ImageView
-    private lateinit var continueSub: TextView
-    private lateinit var continueProgress: ProgressBar
-    private lateinit var continuePlayBtn: TextView
-    private var tab = 0
-    private var topActions: List<View> = emptyList()
-    private lateinit var libraryQueryBox: EditText
-    private var libraryQuery = ""
-    private lateinit var searchProgress: ProgressBar
-    private lateinit var suggestBox: View
-    private lateinit var libraryTip: View
+    internal lateinit var libraryPane: View
+    internal lateinit var libraryList: ListView
+    internal lateinit var libraryGrid: GridView
+    internal lateinit var libraryEmpty: TextView
+    internal lateinit var continueBar: View
+    internal lateinit var continueText: TextView
+    internal lateinit var viewBtn: TextView
+    internal lateinit var sortBtn: TextView
+    internal lateinit var filterBtn: TextView
+    internal var shelfAdapter: ShelfAdapter? = null
+    internal var pendingCoverBook: String? = null
+    internal lateinit var searchPane: View
+    internal lateinit var searchBox: EditText
+    internal lateinit var searchStatus: TextView
+    internal lateinit var resultsList: ListView
+    internal lateinit var tabs: List<LinearLayout>
+    internal lateinit var topTitle: TextView
+    internal lateinit var settingsPane: android.widget.ScrollView
+    internal lateinit var emptyBox: LinearLayout
+    internal lateinit var continueCover: ImageView
+    internal lateinit var continueSub: TextView
+    internal lateinit var continueProgress: ProgressBar
+    internal lateinit var continuePlayBtn: TextView
+    internal var tab = 0
+    internal var topActions: List<View> = emptyList()
+    internal lateinit var libraryQueryBox: EditText
+    internal var libraryQuery = ""
+    internal lateinit var searchProgress: ProgressBar
+    internal lateinit var suggestBox: View
+    internal lateinit var libraryTip: View
 
-    private var books: List<Book> = emptyList()
-    private val results = ArrayList<SearchResult>()
-    private var searchGen = 0
-    private var busy = false
-    private var showingSearch = false
-    private val pool = Executors.newFixedThreadPool(8)
+    internal var books: List<Book> = emptyList()
+    internal val results = ArrayList<SearchResult>()
+    internal var searchGen = 0
+    internal var busy = false
+    internal var showingSearch = false
+    internal val pool = Executors.newFixedThreadPool(8)
 
-    private val sources: List<Pair<String, (String) -> List<SearchResult>>> = listOf(
+    internal val sources: List<Pair<String, (String) -> List<SearchResult>>> = listOf(
         "Gutenberg" to { s -> Sources.gutenberg(s) },
         "Standard Ebooks" to { s -> Sources.standardEbooks(s) },
         "Internet Archive" to { s -> Sources.archive(s) },
@@ -401,57 +401,9 @@ class MainActivity : Activity() {
 
     // ---------- phone ↔ PC sync ----------
 
-    private fun syncMenu() {
-        val on = Settings.syncUri(this) != null
-        val last = Settings.lastSync(this)
-        val msg = if (on) "Your place, bookmarks, highlights, notes, collections and reading stats are kept in step with the PC app through a ShelfReader-sync.json file." +
-            (if (last > 0) "\n\nLast synced: " + java.text.DateFormat.getDateTimeInstance().format(Date(last)) else "")
-        else "Keep your place, bookmarks, highlights, notes, collections and stats the same on this phone and your PC.\n\n" +
-            "1. In the PC app, open Settings → Sync and pick a folder in Google Drive or OneDrive.\n" +
-            "2. Here, tap “Choose the sync file” and pick ShelfReader-sync.json in that same folder (in the Drive or OneDrive section of the file picker).\n\n" +
-            "No PC yet? Tap “Create a new sync file” to make one in Drive, then point the PC app at that folder.\n\nBooks themselves aren't copied — add them on both devices."
-        val b = AlertDialog.Builder(this).setTitle("Sync with PC").setMessage(msg)
-        if (on) {
-            b.setPositiveButton("Sync now") { _, _ -> runSync(true) }
-            b.setNeutralButton("Turn off") { _, _ -> Settings.setSyncUri(this, null); toast("Sync turned off") }
-            b.setNegativeButton("Change file…") { _, _ -> pickSyncFile(false) }
-        } else {
-            b.setPositiveButton("Choose the sync file") { _, _ -> pickSyncFile(false) }
-            b.setNeutralButton("Create a new sync file") { _, _ -> pickSyncFile(true) }
-            b.setNegativeButton("Cancel", null)
-        }
-        b.show()
-    }
+    internal var syncing = false
 
-    private fun pickSyncFile(create: Boolean) {
-        try {
-            val i = if (create) Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
-                .setType("application/json").putExtra(Intent.EXTRA_TITLE, "ShelfReader-sync.json")
-            else Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*")
-            @Suppress("DEPRECATION")
-            startActivityForResult(i, 47)
-        } catch (e: Throwable) { toast("No file picker available") }
-    }
-
-    private var syncing = false
-
-    private fun runSync(announce: Boolean) {
-        if (syncing || Settings.syncUri(this) == null) return
-        syncing = true
-        pool.execute {
-            val msg = try {
-                val (pulled, pushed) = SyncFile.sync(this)
-                "Synced: $pulled book${if (pulled == 1) "" else "s"} updated from the other device, $pushed in the sync file."
-            } catch (t: Throwable) { "Sync failed: ${t.message}" }
-            runOnUiThread {
-                syncing = false
-                if (announce || msg.startsWith("Sync failed")) toast(msg)
-                if (!showingSearch) refreshLibrary()
-            }
-        }
-    }
-
-    private fun showTab(k: Int) {
+    internal fun showTab(k: Int) {
         tab = k
         showingSearch = k == 1
         libraryPane.visibility = if (k == 0) View.VISIBLE else View.GONE
@@ -468,93 +420,12 @@ class MainActivity : Activity() {
         when (k) { 0 -> refreshLibrary(); 1 -> searchBox.requestFocus(); 2 -> buildSettings() }
     }
 
-    // ---------- settings: every option in one clear place ----------
-    private fun buildSettings() {
-        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, 0, 0, dp(24)) }
-        fun add(v: View) = col.addView(v)
-        val svc = { TtsService.instance?.applySettings(true) }
-        add(sectionTitle("Voice & audio"))
-        add(settingRow("🗣", "Voice and speed", "Default voice for new books, and how fast it reads. Each book can also have its own (in the player).") { defaultVoiceDialog() })
-        add(settingRow("✨", "Get better voices", "Install natural Google voices, step by step") { showVoiceGuide(this) })
-        add(settingRow("🔤", "Pronunciations", "Fix names or words the voice says wrong") { editPronunciations { svc() } })
-        add(settingRow("⏸", "Natural pauses", "Pause by punctuation, longer between paragraphs, chapter headings announced", Settings.naturalPauses(this)) { Settings.setNaturalPauses(this, it?.isChecked == true); svc() })
-        add(settingRow("🔢", "Say numbers properly", "“Chapter XII” → “Chapter Twelve”, Henry VIII, 1850s, $4.50, Dr., St.", Settings.speakNumbers(this)) { Settings.setSpeakNumbers(this, it?.isChecked == true); svc() })
-        add(settingRow("🧵", "Fix broken lines", "Join sentences a book split across lines (common in scanned books and PDFs) before reading them aloud", Settings.fixBrokenLines(this)) { Settings.setFixBrokenLines(this, it?.isChecked == true); svc() })
-        add(settingRow("✂", "Skip page numbers & clutter", "Page numbers, running headers, footnote markers, links", Settings.skipClutter(this)) { Settings.setSkipClutter(this, it?.isChecked == true); svc() })
-        add(settingRow("🎧", "Resume with headphones", "Continue a paused book when headphones connect", Settings.resumeOnHeadphones(this)) { Settings.setResumeOnHeadphones(this, it?.isChecked == true) })
-        add(settingRow("⚙", "Android text-to-speech settings", "Speech engine, language packs and default rate") { openTtsSettingsScreen() })
-        add(sectionTitle("Your books"))
-        add(settingRow("🔁", "Keep listening", "When a book ends, start another: Up next first, then Want to read, then books you've started", Settings.autoNextBook(this)) { Settings.setAutoNextBook(this, it?.isChecked == true) })
-        add(settingRow("⏭", "Up next", "Books that play one after another (${Settings.queue(this).size})") { showQueue() })
-        add(settingRow("🔎", "Search inside your books", "Find a word or phrase in every book and listen from there") { searchBooks() })
-        add(settingRow("📊", "Reading stats", "Daily goal, streak and finished books") { showStats(this) })
-        add(settingRow("🗂", "Collections", "Delete collections you made") { manageCollections() })
-        add(sectionTitle("Sync & backup"))
-        add(settingRow("🔄", "Sync with PC", if (Settings.syncUri(this) != null) "On · keeps your place, notes and stats in step with the PC app" else "Off · keep your place and notes the same on your PC") { syncMenu() })
-        add(settingRow("💾", "Back up library", "Save books, places and notes to one file") { backupLibrary() })
-        add(settingRow("📥", "Restore from backup", "Bring back a backup file") { restoreLibrary() })
-        add(sectionTitle("App"))
-        add(settingRow("🐞", "Report a problem", "Stuck, skipping, crashes: makes a report of what the app was doing") { CrashReport.reportProblem(this) })
-        add(settingRow("⬆", "Check for updates", "You have build ${Updater.currentBuild(this)} · ${if (Settings.betaUpdates(this)) "Beta" else "Stable"} updates") { checkUpdates(true) })
-        add(settingRow("🧪", "Update channel: ${if (Settings.betaUpdates(this)) "Beta" else "Stable"}",
-            if (Settings.betaUpdates(this)) "Every new build straight away (may have new problems). Tap for Stable" else "Only builds that passed every test. Tap for Beta (newest builds first)") {
-            Settings.setBetaUpdates(this, !Settings.betaUpdates(this)); buildSettings()
-        })
-        add(settingRow("🔑", "GitHub token for updates", if (Settings.updateToken(this) != null) "Saved · updates work while the repository is private" else "Needed while the repository is private") { tokenDialog() })
-        settingsPane.removeAllViews()
-        settingsPane.addView(col)
-    }
-
-    private fun defaultVoiceDialog() {
-        val rates = listOf(0.75f, 0.9f, 1f, 1.1f, 1.25f, 1.5f, 1.75f, 2f)
-        AlertDialog.Builder(this).setTitle("Default speed for new books")
-            .setItems(rates.map { (if (it == 1f) "Normal" else "${it}×") + if (it == Settings.rate(this)) "  ✓" else "" }.toTypedArray()) { _, w ->
-                Settings.setRate(this, rates[w]); TtsService.instance?.applySettings(true); toast("Default speed set. Open a book to choose its voice.")
-            }.setNeutralButton("Choose voices in a book") { _, _ -> toast("Open a book, then tap 🗣 Voice in the player.") }
-            .show()
-    }
-
-    private fun openTtsSettingsScreen() {
-        try { startActivity(Intent("com.android.settings.TTS_SETTINGS")) } catch (e: Throwable) { toast("Couldn't open the speech settings") }
-    }
-
-    private fun backupLibrary() {
-        val name = "ShelfReader-backup-" + SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date()) + ".zip"
-        try {
-            @Suppress("DEPRECATION")
-            startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/zip").putExtra(Intent.EXTRA_TITLE, name), 45)
-        } catch (e: Throwable) { toast("No file picker available") }
-    }
-
-    private fun restoreLibrary() {
-        try {
-            @Suppress("DEPRECATION")
-            startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*")
-                .putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream")), 46)
-        } catch (e: Throwable) { toast("No file picker available") }
-    }
-
-    private val emptyText = "No books yet.\n\nFind thousands of free books to read or listen to, " +
+    internal val emptyText = "No books yet.\n\nFind thousands of free books to read or listen to, " +
         "or add an EPUB, PDF or TXT file that's already on your phone."
 
-    private fun manageCollections() {
-        val custom = Collections.names(this).drop(2)
-        if (custom.isEmpty()) {
-            toast("You haven't made any collections yet. Long-press a book → Collections… → New collection.")
-            return
-        }
-        AlertDialog.Builder(this).setTitle("Delete a collection").setItems(custom.toTypedArray()) { _, w ->
-            AlertDialog.Builder(this)
-                .setMessage("Delete the collection “${custom[w]}”? The books stay in your library.")
-                .setPositiveButton("Delete") { _, _ -> Collections.delete(this, custom[w]); refreshLibrary() }
-                .setNegativeButton("Cancel", null)
-                .show()
-        }.show()
-    }
+    internal fun sortKey(s: String) = s.lowercase().replace(Regex("^(the|a|an)\\s+"), "")
 
-    private fun sortKey(s: String) = s.lowercase().replace(Regex("^(the|a|an)\\s+"), "")
-
-    private fun refreshLibrary() {
+    internal fun refreshLibrary() {
         val all = Library.load(this)
         var filter = Settings.libraryFilter(this)
         if (filter.isNotEmpty() && filter !in Collections.names(this)) { filter = ""; Settings.setLibraryFilter(this, "") }
@@ -617,13 +488,13 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun openBook(b: Book) {
+    internal fun openBook(b: Book) {
         startActivity(Intent(this, ReaderActivity::class.java).putExtra("book", b.id))
     }
 
     // ---------- shelf / grid ----------
 
-    private inner class ShelfAdapter(private val shelf: Boolean) : BaseAdapter() {
+    internal inner class ShelfAdapter(private val shelf: Boolean) : BaseAdapter() {
         override fun getCount() = books.size
         override fun getItem(position: Int): Any = books[position]
         override fun getItemId(position: Int) = position.toLong()
@@ -643,7 +514,7 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun makeCell(shelf: Boolean): Cell {
+    internal fun makeCell(shelf: Boolean): Cell {
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val frame = FrameLayout(this).apply {
             if (shelf) setPadding(dp(9), dp(18), dp(9), 0) else setPadding(0, 0, 0, 0)
@@ -713,331 +584,15 @@ class MainActivity : Activity() {
 
     // ---------- per-book actions ----------
 
-    private fun bookMenu(b: Book) {
-        val queued = b.id in Settings.queue(this)
-        val pct = Library.percent(this, b)
-        sheet(b.title + (if (b.author.isNotBlank()) " · ${b.author}" else "") + " · $pct% read", listOf(
-            SheetRow("📖", "Open") { openBook(b) },
-            SheetRow("▶", "Read aloud now", "Keeps playing with the screen off") {
-                startForegroundService(
-                    Intent(this, TtsService::class.java).setAction(TtsService.ACTION_PLAY).putExtra(TtsService.EXTRA_BOOK, b.id)
-                )
-                toast("Reading “${b.title}” aloud")
-                libraryGrid.postDelayed({ refreshLibrary() }, 800)
-            },
-            SheetRow("⏭", if (queued) "Remove from Up next" else "Add to Up next", if (queued) null else "Plays when the books before it finish") {
-                val q = Settings.queue(this).toMutableList()
-                if (queued) q.remove(b.id) else q += b.id
-                Settings.setQueue(this, q)
-                toast(if (queued) "Removed from Up next" else "Added to Up next")
-            },
-            SheetRow("🚗", "Car mode", "Huge buttons for driving") { startActivity(Intent(this, CarModeActivity::class.java).putExtra("book", b.id)) },
-            null,
-            SheetRow("🗂", "Collections…", "Sort it into shelves like Want to read") { editCollections(this, b.id) { refreshLibrary() } },
-            SheetRow("✏", "Edit title & author") { editBook(b) },
-            SheetRow("🖼", "Change cover…", "Pick a picture from your phone") {
-                pendingCoverBook = b.id
-                try {
-                    @Suppress("DEPRECATION")
-                    startActivityForResult(
-                        Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("image/*"), 44
-                    )
-                } catch (e: Throwable) { toast("No picture picker available") }
-            },
-            SheetRow("↺", "Reset cover") { Covers.reset(this, b); refreshLibrary() },
-            SheetRow("ℹ", "About this book…", "Description, subjects and similar free books") { aboutBook(b) },
-            null,
-            SheetRow("🗑", "Remove from library") { confirmDelete(b) }
-        ))
-    }
-
-    // ---------- Up next ----------
-    private fun showQueue() {
-        val q = Settings.queue(this).mapNotNull { Library.get(this, it) }
-        if (q.isEmpty()) { toast("Nothing in Up next. Long-press a book and choose “Add to Up next”."); return }
-        val labels = q.mapIndexed { k, b -> "${k + 1}. ${b.title}" }.toTypedArray()
-        AlertDialog.Builder(this).setTitle("Up next").setItems(labels) { _, w ->
-            val b = q[w]
-            AlertDialog.Builder(this).setTitle(b.title)
-                .setItems(arrayOf("Open", "Move to the top", "Remove from Up next")) { _, a ->
-                    val ids = q.map { it.id }.toMutableList()
-                    when (a) {
-                        0 -> openBook(b)
-                        1 -> { ids.remove(b.id); ids.add(0, b.id); Settings.setQueue(this, ids); showQueue() }
-                        2 -> { ids.remove(b.id); Settings.setQueue(this, ids); showQueue() }
-                    }
-                }.show()
-        }.setNegativeButton("Close", null).show()
-    }
-
     // ---------- search inside every book ----------
-    private data class Hit(val book: Book, val para: Int, val snippet: String, val where: String)
-
-    private fun searchBooks() {
-        val box = EditText(this).apply { hint = "Word or phrase in any book"; setSingleLine() }
-        val wrap = LinearLayout(this).apply { setPadding(dp(20), dp(8), dp(20), 0); addView(box, LinearLayout.LayoutParams(-1, -2)) }
-        AlertDialog.Builder(this).setTitle("Search inside your books").setView(wrap)
-            .setPositiveButton("Search") { _, _ ->
-                val q = box.text.toString().trim()
-                if (q.length < 2) return@setPositiveButton
-                toast("Searching…")
-                pool.execute {
-                    val hits = ArrayList<Hit>()
-                    for (b in Library.load(this)) {
-                        val d = try { Library.doc(this, b) } catch (t: Throwable) { continue }
-                        var n = 0
-                        for ((i, p) in d.paras.withIndex()) {
-                            val k = p.indexOf(q, ignoreCase = true)
-                            if (k < 0) continue
-                            val a = maxOf(0, k - 60); val e = minOf(p.length, k + q.length + 80)
-                            val ch = d.chapters.lastOrNull { it.para <= i }?.title ?: ""
-                            hits += Hit(b, i, (if (a > 0) "…" else "") + p.substring(a, e) + (if (e < p.length) "…" else ""), ch)
-                            if (++n >= 6 || hits.size >= 150) break
-                        }
-                        if (hits.size >= 150) break
-                    }
-                    runOnUiThread {
-                        if (hits.isEmpty()) { toast("Not found in any book."); return@runOnUiThread }
-                        val labels = hits.map { "${it.book.title}${if (it.where.isNotEmpty()) " · " + it.where else ""}\n${it.snippet}" }.toTypedArray()
-                        AlertDialog.Builder(this).setTitle("${hits.size}${if (hits.size >= 150) "+" else ""} places · tap to listen from there")
-                            .setItems(labels) { _, w ->
-                                val h = hits[w]
-                                startActivity(Intent(this, ReaderActivity::class.java).putExtra("book", h.book.id).putExtra("para", h.para).putExtra("play", true))
-                            }.setNegativeButton("Close", null).show()
-                    }
-                }
-            }
-            .setNegativeButton("Cancel", null).show()
-    }
-
-    // ---------- about a book ----------
-    private fun aboutBook(b: Book) {
-        toast("Looking it up…")
-        pool.execute {
-            var info = ""; var subjects = listOf<String>(); var desc = ""; var key = ""
-            try {
-                val author = b.author.split(",", " and ").first().trim()
-                val url = "https://openlibrary.org/search.json?title=" + java.net.URLEncoder.encode(b.title, "UTF-8") +
-                    (if (author.isNotEmpty()) "&author=" + java.net.URLEncoder.encode(author, "UTF-8") else "") +
-                    "&fields=key,first_publish_year,subject,number_of_pages_median,edition_count&limit=1"
-                val d = org.json.JSONObject(Net.get(url)).optJSONArray("docs")?.optJSONObject(0)
-                if (d != null) {
-                    key = d.optString("key")
-                    info = listOfNotNull(
-                        d.optInt("first_publish_year").takeIf { it > 0 }?.let { "First published $it" },
-                        d.optInt("number_of_pages_median").takeIf { it > 0 }?.let { "about $it pages" },
-                        d.optInt("edition_count").takeIf { it > 0 }?.let { "$it editions" }
-                    ).joinToString(" · ")
-                    val sj = d.optJSONArray("subject")
-                    subjects = (0 until (sj?.length() ?: 0)).map { sj!!.getString(it) }
-                        .filter { it.length < 40 && !Regex("(?i)accessible|protected|in library|lending|overdrive|large type|nyt:").containsMatchIn(it) }.take(10)
-                    if (key.isNotEmpty()) {
-                        val w = org.json.JSONObject(Net.get("https://openlibrary.org$key.json"))
-                        desc = w.optJSONObject("description")?.optString("value") ?: w.optString("description", "")
-                        desc = desc.replace(Regex("\\[([^\\]]+)\\]\\([^)]*\\)"), "$1").replace(Regex("-{3,}[\\s\\S]*$"), "").trim()
-                    }
-                }
-            } catch (t: Throwable) { }
-            val author = b.author.split(",", " and ").first().trim()
-            val more = try { if (author.isNotEmpty()) Sources.gutenberg(author).filter { !it.title.equals(b.title, true) }.take(8) else emptyList() } catch (t: Throwable) { emptyList() }
-            val related = try { subjects.firstOrNull()?.let { s -> Sources.gutenberg(s).filter { !it.title.equals(b.title, true) }.take(6) } ?: emptyList() } catch (t: Throwable) { emptyList() }
-            runOnUiThread {
-                val msg = StringBuilder()
-                if (info.isNotEmpty()) msg.append(info).append("\n\n")
-                msg.append(if (desc.isNotEmpty()) (if (desc.length > 1100) desc.take(1100) + "…" else desc) else "No description found.")
-                if (subjects.isNotEmpty()) msg.append("\n\nSubjects: ").append(subjects.joinToString(", "))
-                val picks = more + related
-                val dlg = AlertDialog.Builder(this).setTitle(b.title).setMessage(msg.toString()).setNegativeButton("Close", null)
-                if (picks.isNotEmpty()) dlg.setPositiveButton("More free books…") { _, _ ->
-                    val labels = picks.map { (if (it in more) "More by $author: " else "Related: ") + it.title }.toTypedArray()
-                    AlertDialog.Builder(this).setTitle("Free books from Project Gutenberg").setItems(labels) { _, w -> confirmDownload(picks[w]) }.show()
-                }
-                dlg.show()
-            }
-        }
-    }
-
-    private fun editBook(b: Book) {
-        val box = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(8), dp(20), 0)
-        }
-        val t = EditText(this).apply { hint = "Title"; setText(b.title) }
-        val a = EditText(this).apply { hint = "Author"; setText(b.author) }
-        box.addView(t)
-        box.addView(a)
-        AlertDialog.Builder(this)
-            .setTitle("Edit book")
-            .setView(box)
-            .setPositiveButton("Save") { _, _ ->
-                val nb = b.copy(title = t.text.toString().trim().ifEmpty { b.title }, author = a.text.toString().trim())
-                Library.update(this, nb)
-                Covers.invalidate(b.id)
-                refreshLibrary()
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
-    }
-
-    private fun confirmDelete(b: Book) {
-        AlertDialog.Builder(this)
-            .setTitle("Remove book?")
-            .setMessage("“${b.title}” will be deleted from this phone, along with its bookmarks and notes.")
-            .setPositiveButton("Remove") { _, _ ->
-                if (TtsService.instance?.bookId == b.id) {
-                    startService(Intent(this, TtsService::class.java).setAction(TtsService.ACTION_STOP))
-                }
-                Library.remove(this, b)
-                refreshLibrary()
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
-    }
+    internal data class Hit(val book: Book, val para: Int, val snippet: String, val where: String)
 
     // ---------- updates ----------
 
-    private fun checkUpdates(manual: Boolean) {
-        if (manual) toast("Checking GitHub for updates…")
-        pool.execute {
-            try {
-                val r = Updater.latest(this)
-                val cur = Updater.currentBuild(this)
-                Settings.setLastUpdateCheck(this, System.currentTimeMillis())
-                runOnUiThread {
-                    if (r != null && r.build > cur) {
-                        AlertDialog.Builder(this)
-                            .setTitle("Update available")
-                            .setMessage("Build ${r.build} is ready (you have build $cur).")
-                            .setPositiveButton("Install") { _, _ -> installUpdate(r) }
-                            .setNegativeButton("Later", null)
-                            .show()
-                    } else if (manual) {
-                        toast("You're up to date (build $cur).")
-                    }
-                }
-            } catch (t: Throwable) {
-                if (manual) runOnUiThread {
-                    AlertDialog.Builder(this).setTitle("Couldn't check for updates").setMessage(t.message ?: "Unknown error")
-                        .setPositiveButton("Add a token…") { _, _ -> tokenDialog() }
-                        .setNegativeButton("Close", null).show()
-                }
-            }
-        }
-    }
-
-    /** Paste a read-only GitHub token so the app can see new builds while the repository is private. */
-    private fun tokenDialog() {
-        val box = EditText(this).apply {
-            hint = if (Settings.updateToken(this@MainActivity) != null) "A token is saved. Paste a new one to replace it" else "github_pat_…"
-            setSingleLine(); inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
-        }
-        val info = TextView(this).apply {
-            textSize = 14f
-            text = "While the GitHub repository is private, GitHub only shares new builds with your account.\n\n" +
-                "1. On GitHub: Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token.\n" +
-                "2. Repository access: Only select repositories → shelf-reader.\n" +
-                "3. Permissions: Contents → Read-only. Generate, copy, paste below.\n\nIt stays on this phone. (If the repository is public, no token is needed.)"
-        }
-        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(8), dp(20), 0); addView(info); addView(box) }
-        val dlg = AlertDialog.Builder(this).setTitle("Updates from a private repository").setView(android.widget.ScrollView(this).apply { addView(col) })
-            .setPositiveButton("Save & check") { _, _ ->
-                val t = box.text.toString().trim()
-                if (t.isNotEmpty() && !Regex("^(github_pat_|ghp_)[A-Za-z0-9_]{20,}$").matches(t)) { toast("That doesn't look like a GitHub token (it starts with github_pat_ or ghp_)."); return@setPositiveButton }
-                if (t.isNotEmpty()) Settings.setUpdateToken(this, t)
-                checkUpdates(true)
-            }
-            .setNegativeButton("Cancel", null)
-        if (Settings.updateToken(this) != null) dlg.setNeutralButton("Remove token") { _, _ -> Settings.setUpdateToken(this, null); toast("Token removed") }
-        dlg.show()
-    }
-
-    private fun installUpdate(r: Updater.Release) {
-        toast("Downloading update…")
-        pool.execute {
-            try {
-                val f = File(cacheDir, "update.apk")
-                f.delete()
-                // with a token, download through GitHub's API (works for private repositories)
-                if (Settings.updateToken(this) != null && r.apiUrl.isNotEmpty()) Net.download(r.apiUrl, f, Updater.headers(this, asset = true)) { _, _ -> }
-                else Net.download(r.url, f) { _, _ -> }
-                runOnUiThread { toast("Installing — confirm on the next screen.") }
-                Updater.install(this, f)
-            } catch (t: Throwable) {
-                runOnUiThread { toast("Update failed: ${t.message}") }
-            }
-        }
-    }
-
     // ---------- search ----------
 
-    private fun doSearch() {
-        val q = searchBox.text.toString().trim()
-        if (q.isEmpty()) return
-        (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).hideSoftInputFromWindow(searchBox.windowToken, 0)
-        val gen = ++searchGen
-        results.clear()
-        updateResults()
-        suggestBox.visibility = View.GONE
-        searchProgress.isIndeterminate = true
-        searchProgress.visibility = View.VISIBLE
-        searchStatus.text = "Searching 6 free libraries…"
-        val errors = ArrayList<String>()
-        val seen = HashSet<String>()
-        var pending = sources.size
-
-        fun finishOne(source: String, list: List<SearchResult>?, err: Throwable?) {
-            runOnUiThread {
-                if (gen != searchGen) return@runOnUiThread
-                pending--
-                if (list != null) {
-                    for (r in list) {
-                        val key = r.iaId ?: r.url ?: r.title
-                        if (seen.add(key)) results.add(r)
-                    }
-                }
-                if (err != null) errors.add(source)
-                updateResults()
-                if (pending <= 0 && !busy) searchProgress.visibility = View.GONE
-                val tail = if (errors.isNotEmpty()) " (couldn't reach " + errors.joinToString(", ") + ")" else ""
-                searchStatus.text = when {
-                    pending > 0 -> "Searching… ${results.size} found so far$tail"
-                    results.isEmpty() && errors.size == sources.size -> "Couldn't reach any library. Check your internet connection and try again."
-                    results.isEmpty() -> "No free books found for “$q”$tail.\n\nTry fewer words, just the author's last name, or check the spelling. " +
-                        "Newer books are usually not free."
-                    else -> "${results.size} book${if (results.size == 1) "" else "s"} found$tail. Tap one to see details and download."
-                }
-                if (pending <= 0 && results.isEmpty()) suggestBox.visibility = View.VISIBLE
-            }
-        }
-
-        for ((name, fn) in sources) {
-            pool.execute {
-                try { finishOne(name, fn(q), null) } catch (t: Throwable) { finishOne(name, null, t) }
-            }
-        }
-    }
-
-    /** Best matches first: the words you typed in the author or title. */
-    private fun score(r: SearchResult, q: String): Int {
-        val words = q.lowercase().split(Regex("\\s+")).filter { it.length > 1 }
-        val a = r.author.lowercase(); val t = r.title.lowercase()
-        var s = 0
-        if (a.contains(q.lowercase())) s += 50
-        if (t.contains(q.lowercase())) s += 40
-        for (w in words) { if (a.contains(w)) s += 10; if (t.contains(w)) s += 8 }
-        if (r.url != null || r.source.contains("Standard")) s += 3
-        return s
-    }
-
-    private fun updateResults() {
-        val q = searchBox.text.toString().trim()
-        val sorted = results.withIndex().sortedWith(compareByDescending<IndexedValue<SearchResult>> { score(it.value, q) }.thenBy { it.index }).map { it.value }
-        results.clear(); results.addAll(sorted)
-        resultsList.adapter = ResultAdapter()
-    }
-
     /** Search results with covers. */
-    private inner class ResultAdapter : BaseAdapter() {
+    internal inner class ResultAdapter : BaseAdapter() {
         override fun getCount() = results.size
         override fun getItem(position: Int): Any = results[position]
         override fun getItemId(position: Int) = position.toLong()
@@ -1075,134 +630,11 @@ class MainActivity : Activity() {
             return row
         }
     }
-    private val thumbCache = android.util.LruCache<String, android.graphics.Bitmap>(80)
-
-    /** Book details (cover, description, info) before downloading. */
-    private fun confirmDownload(r: SearchResult) {
-        if (busy) { toast("Already downloading — one moment."); return }
-        val img = ImageView(this).apply {
-            scaleType = ImageView.ScaleType.CENTER_CROP
-            setBackgroundColor(0x33888888)
-        }
-        val col = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(14), 0, 0, 0)
-            addView(TextView(this@MainActivity).apply {
-                text = r.title; textSize = 18f; setTypeface(typeface, android.graphics.Typeface.BOLD)
-            })
-            addView(TextView(this@MainActivity).apply {
-                text = r.author.ifBlank { "Unknown author" }; textSize = 15f; setPadding(0, dp(4), 0, 0)
-            })
-            addView(TextView(this@MainActivity).apply {
-                text = "From ${r.source}" + (r.info?.let { "\n$it" } ?: ""); textSize = 13f; alpha = 0.7f; setPadding(0, dp(6), 0, 0)
-            })
-        }
-        val top = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            addView(img, LinearLayout.LayoutParams(dp(96), dp(144)))
-            addView(col, LinearLayout.LayoutParams(0, WRAP, 1f))
-        }
-        val body = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(16), dp(20), dp(8))
-            addView(top)
-            addView(TextView(this@MainActivity).apply {
-                text = r.description ?: "No description available."
-                textSize = 15f
-                setLineSpacing(0f, 1.2f)
-                setPadding(0, dp(14), 0, 0)
-            })
-        }
-        if (r.cover != null) {
-            pool.execute {
-                val bmp = Covers.fromUrl(r.cover)
-                if (bmp != null) runOnUiThread { img.setImageBitmap(bmp) }
-            }
-        } else {
-            img.visibility = View.GONE
-        }
-        AlertDialog.Builder(this)
-            .setView(ScrollView(this).apply { addView(body) })
-            .setPositiveButton("Download") { _, _ -> download(r) }
-            .setNeutralButton("Download for later") { _, _ -> download(r, later = true) }
-            .setNegativeButton("Cancel", null)
-            .show()
-    }
-
-    private fun checkFile(f: File, fmt: String) {
-        val head = ByteArray(5)
-        val n = f.inputStream().use { it.read(head) }
-        val ok = when (fmt) {
-            "epub" -> n >= 2 && head[0] == 'P'.code.toByte() && head[1] == 'K'.code.toByte()
-            "pdf" -> n >= 4 && String(head, 0, 4, Charsets.US_ASCII) == "%PDF"
-            else -> true
-        }
-        if (!ok) throw Exception("the site sent a web page instead of the book file")
-    }
-
-    private fun download(r: SearchResult, later: Boolean = false) {
-        busy = true
-        searchStatus.text = "Getting “${r.title}”…"
-        searchProgress.isIndeterminate = true
-        searchProgress.visibility = View.VISIBLE
-        pool.execute {
-            var dest: File? = null
-            try {
-                val (url, fmt) = if (r.url != null && r.format != null) r.url to r.format
-                else Sources.resolveArchive(r.iaId ?: throw Exception("missing item id"))
-                val id = "b" + System.currentTimeMillis()
-                val file = File(Library.dir(this), "$id.$fmt")
-                dest = file
-                Net.download(url, file) { done, total ->
-                    runOnUiThread {
-                        if (total > 0) { searchProgress.isIndeterminate = false; searchProgress.progress = (done * 100 / total).toInt() }
-                        searchStatus.text = "Downloading “${r.title}”… " +
-                            if (total > 0) "${done * 100 / total}%" else "${done / 1024} KB"
-                    }
-                }
-                checkFile(file, fmt)
-                runOnUiThread { searchStatus.text = "Preparing text and chapters…" }
-                var title = r.title
-                var author = r.author
-                if (fmt == "epub" && author.isBlank()) {
-                    val (t, a) = Extract.epubInfo(file)
-                    if (!a.isNullOrBlank()) author = a
-                    if (title.isBlank() && !t.isNullOrBlank()) title = t
-                }
-                val book = Book(id, title, author, file.name, fmt, System.currentTimeMillis())
-                Library.doc(this, book) // extract now so problems show up here
-                r.cover?.let {
-                    runOnUiThread { searchStatus.text = "Getting the cover…" }
-                    Covers.fetch(this, id, it)
-                }
-                Library.add(this, book)
-                if (later) Collections.add(this, id, Collections.WANT)
-                runOnUiThread {
-                    busy = false
-                    searchProgress.visibility = View.GONE
-                    if (later) {
-                        searchStatus.text = "Added “${r.title}” to your library, in Want to read."
-                        toast("Saved for later")
-                    } else {
-                        searchStatus.text = "Added “${r.title}” to your library."
-                        openBook(book)
-                    }
-                }
-            } catch (t: Throwable) {
-                dest?.delete()
-                runOnUiThread {
-                    busy = false
-                    searchProgress.visibility = View.GONE
-                    searchStatus.text = "Couldn't get that book: ${t.message ?: t.javaClass.simpleName}. " +
-                        "Try another copy from the list — the same book is often on several sites."
-                }
-            }
-        }
-    }
+    internal val thumbCache = android.util.LruCache<String, android.graphics.Bitmap>(80)
 
     // ---------- import ----------
 
-    private fun pickFile() {
+    internal fun pickFile() {
         val i = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
             type = "*/*"
@@ -1261,7 +693,7 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun importUri(uri: Uri) {
+    internal fun importUri(uri: Uri) {
         var name = "book"
         try {
             contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->

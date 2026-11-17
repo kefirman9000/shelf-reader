@@ -45,74 +45,74 @@ import java.util.Locale
 
 class ReaderActivity : Activity(), BookPageView.Host {
 
-    private lateinit var book: Book
-    private var paras: List<String> = emptyList()
-    private var chapters: List<Chapter> = emptyList()
-    private var pics: Map<Int, List<String>> = emptyMap()
+    internal lateinit var book: Book
+    internal var paras: List<String> = emptyList()
+    internal var chapters: List<Chapter> = emptyList()
+    internal var pics: Map<Int, List<String>> = emptyMap()
     /** cont[i]: paragraph i is the rest of a sentence broken off at the end of paragraph i-1 */
-    private var cont = BooleanArray(0)
+    internal var cont = BooleanArray(0)
 
     /** Works out which paragraphs carry on a sentence from the one before. */
-    private fun findBrokenLines(ps: List<String>): BooleanArray {
+    internal fun findBrokenLines(ps: List<String>): BooleanArray {
         if (!Settings.fixBrokenLines(this)) return BooleanArray(ps.size)
         val len = SpeechText.lineLength(ps)
         return BooleanArray(ps.size) { i -> i > 0 && SpeechText.continues(ps[i - 1], ps[i], len) }
     }
 
     /** The first paragraph of the run that [p] belongs to (the row that shows it in the scrolling view). */
-    private fun rowOf(p: Int): Int { var k = p; while (k > 0 && cont.getOrElse(k) { false }) k--; return k }
-    private var notes: List<Note> = emptyList()
-    private var marks: Map<Int, String> = emptyMap()
+    internal fun rowOf(p: Int): Int { var k = p; while (k > 0 && cont.getOrElse(k) { false }) k--; return k }
+    internal var notes: List<Note> = emptyList()
+    internal var marks: Map<Int, String> = emptyMap()
 
-    private lateinit var root: LinearLayout
-    private lateinit var list: ListView
-    private lateinit var bookView: BookPageView
-    private lateinit var controls: LinearLayout
-    private lateinit var topBarView: LinearLayout
-    private lateinit var playBtn: TextView
-    private lateinit var speedBtn: TextView
-    private lateinit var layoutChip: TextView
-    private lateinit var compactBtn: TextView
-    private lateinit var chipScroll: View
-    private lateinit var seek: android.widget.SeekBar
-    private lateinit var seekLabel: TextView
-    private var seeking = false
-    private var pinching = false
-    private var pinchCancelSent = false
-    private var pinchSize = 18f
-    private lateinit var status: TextView
-    private lateinit var recap: TextView
-    private lateinit var jumpBar: TextView
+    internal lateinit var root: LinearLayout
+    internal lateinit var list: ListView
+    internal lateinit var bookView: BookPageView
+    internal lateinit var controls: LinearLayout
+    internal lateinit var topBarView: LinearLayout
+    internal lateinit var playBtn: TextView
+    internal lateinit var speedBtn: TextView
+    internal lateinit var layoutChip: TextView
+    internal lateinit var compactBtn: TextView
+    internal lateinit var chipScroll: View
+    internal lateinit var seek: android.widget.SeekBar
+    internal lateinit var seekLabel: TextView
+    internal var seeking = false
+    internal var pinching = false
+    internal var pinchCancelSent = false
+    internal var pinchSize = 18f
+    internal lateinit var status: TextView
+    internal lateinit var recap: TextView
+    internal lateinit var jumpBar: TextView
     /** Places you jumped away from (newest first), so you can go back. */
-    private val history = ArrayList<Pair<Int, Long>>()
+    internal val history = ArrayList<Pair<Int, Long>>()
 
-    private var curPara = 0
-    private var curStart = -1
-    private var curEnd = -1
-    private var lastTouch = 0L
-    private var lastInteraction = System.currentTimeMillis()
-    private var loaded = false
-    private var resumed = false
+    internal var curPara = 0
+    internal var curStart = -1
+    internal var curEnd = -1
+    internal var lastTouch = 0L
+    internal var lastInteraction = System.currentTimeMillis()
+    internal var loaded = false
+    internal var resumed = false
 
-    private var textSize = 18f
-    private var theme = READER_THEMES[0]
-    private var themeIndex = 0
-    private var font = FONTS[0]
-    private var margin = 22
+    internal var textSize = 18f
+    internal var theme = READER_THEMES[0]
+    internal var themeIndex = 0
+    internal var font = FONTS[0]
+    internal var margin = 22
 
-    private var bookMode = true
-    private var sections: List<BookPageView.Section> = emptyList()
-    private var curSection = -1
-    private val picBmCache = object : LruCache<String, Bitmap>(24 * 1024 * 1024) {
+    internal var bookMode = true
+    internal var sections: List<BookPageView.Section> = emptyList()
+    internal var curSection = -1
+    internal val picBmCache = object : LruCache<String, Bitmap>(24 * 1024 * 1024) {
         override fun sizeOf(key: String, value: Bitmap) = value.byteCount
     }
 
-    private var probe: TextToSpeech? = null
-    private var probeReady = false
-    private var pendingExport: Pair<Int, Int>? = null
-    private val ui = Handler(Looper.getMainLooper())
+    internal var probe: TextToSpeech? = null
+    internal var probeReady = false
+    internal var pendingExport: Pair<Int, Int>? = null
+    internal val ui = Handler(Looper.getMainLooper())
 
-    private val adapter = object : BaseAdapter() {
+    internal val adapter = object : BaseAdapter() {
         override fun getCount() = paras.size
         override fun getItem(position: Int): Any = paras[position]
         override fun getItemId(position: Int) = position.toLong()
@@ -146,7 +146,7 @@ class ReaderActivity : Activity(), BookPageView.Host {
     }
 
     /** One paragraph for the scrolling view: pictures, bookmark marker, highlights, footnote markers, reading highlight. */
-    private fun rowText(i: Int): CharSequence {
+    internal fun rowText(i: Int): CharSequence {
         val sb = SpannableStringBuilder()
         val maxW = resources.displayMetrics.widthPixels - 2 * dp(margin)
         for (bmp in picturesFor(i)) {
@@ -179,7 +179,7 @@ class ReaderActivity : Activity(), BookPageView.Host {
     }
 
     /** Decoded pictures shown before paragraph [i] (cached). */
-    private fun picturesFor(i: Int): List<Bitmap> {
+    internal fun picturesFor(i: Int): List<Bitmap> {
         val srcs = pics[i] ?: return emptyList()
         val maxW = resources.displayMetrics.widthPixels
         return srcs.mapNotNull { src ->
@@ -413,7 +413,7 @@ class ReaderActivity : Activity(), BookPageView.Host {
     }
 
     /** Every 30 s: count reading time (when you're reading, not listening) and switch to the night theme on schedule. */
-    private val tick = object : Runnable {
+    internal val tick = object : Runnable {
         override fun run() {
             if (resumed && loaded && !isPlaying() && System.currentTimeMillis() - lastInteraction < 120_000) {
                 try { Stats.add(this@ReaderActivity, 30, 0) } catch (t: Throwable) {}
@@ -425,19 +425,22 @@ class ReaderActivity : Activity(), BookPageView.Host {
 
     // ---------- state ----------
 
-    private fun service(): TtsService? = TtsService.instance?.takeIf { it.bookId == book.id }
+    internal fun jumpBarReady() = ::jumpBar.isInitialized
+    internal fun bookViewReady() = ::bookView.isInitialized
 
-    private fun currentPara(): Int = service()?.index ?: Library.position(this, book.id)
+    internal fun service(): TtsService? = TtsService.instance?.takeIf { it.bookId == book.id }
 
-    private fun isPlaying() = service()?.playing == true
+    internal fun currentPara(): Int = service()?.index ?: Library.position(this, book.id)
 
-    private fun chapterIndex(para: Int): Int {
+    internal fun isPlaying() = service()?.playing == true
+
+    internal fun chapterIndex(para: Int): Int {
         var r = -1
         for ((k, c) in chapters.withIndex()) { if (c.para <= para) r = k else break }
         return r
     }
 
-    private fun refresh(force: Boolean = false) {
+    internal fun refresh(force: Boolean = false) {
         if (!loaded) return
         val s = service()
         val seg = s?.currentSeg()
@@ -464,7 +467,7 @@ class ReaderActivity : Activity(), BookPageView.Host {
         refreshButtons()
     }
 
-    private fun updateStatus() {
+    internal fun updateStatus() {
         val s = service()
         val shown = if (bookMode && !isPlaying()) bookView.topPara() else curPara
         val pct = if (paras.isNotEmpty()) (shown + 1) * 100 / paras.size else 0
@@ -483,7 +486,7 @@ class ReaderActivity : Activity(), BookPageView.Host {
     }
 
     /** Compact player: one row of buttons, so the text gets more of the screen. */
-    private fun setCompact(on: Boolean) {
+    internal fun setCompact(on: Boolean) {
         Settings.setCompactPlayer(this, on)
         seekLabel.visibility = if (on) View.GONE else View.VISIBLE
         chipScroll.visibility = if (on) View.GONE else View.VISIBLE
@@ -492,7 +495,7 @@ class ReaderActivity : Activity(), BookPageView.Host {
         (playBtn.layoutParams as? LinearLayout.LayoutParams)?.let { val sz = dp(if (on) 52 else 68); it.width = sz; it.height = sz; playBtn.layoutParams = it }
     }
 
-    private fun stepChapter(d: Int) {
+    internal fun stepChapter(d: Int) {
         if (!loaded || chapters.isEmpty()) return
         val cur = chapterIndex(curPara)
         val target = if (d < 0) {
@@ -504,18 +507,18 @@ class ReaderActivity : Activity(), BookPageView.Host {
         goTo(chapters[target].para)
     }
 
-    private fun refreshButtons() {
+    internal fun refreshButtons() {
         playBtn.text = if (isPlaying()) "❚❚" else "▶"
         if (::layoutChip.isInitialized) layoutChip.text = if (bookMode) "📖 Pages" else "📜 Scroll"
         speedBtn.text = fmtRate(Settings.rateFor(this, book.id))
     }
 
-    private fun fmtRate(r: Float) = (if (r % 1f == 0f) r.toInt().toString() else r.toString()) + "×"
+    internal fun fmtRate(r: Float) = (if (r % 1f == 0f) r.toInt().toString() else r.toString()) + "×"
 
     // ---------- book view (pages) ----------
 
     /** Cover + contents first, then each chapter (long chapters cut into slices of up to 250 paragraphs). */
-    private fun buildSections(): List<BookPageView.Section> {
+    internal fun buildSections(): List<BookPageView.Section> {
         val out = ArrayList<BookPageView.Section>()
         out += BookPageView.Section(0, 0, book.title, true, false)
         val starts = ArrayList<Pair<Int, String>>()
@@ -535,12 +538,12 @@ class ReaderActivity : Activity(), BookPageView.Host {
         return out
     }
 
-    private fun sectionOf(para: Int): Int {
+    internal fun sectionOf(para: Int): Int {
         for (k in 1 until sections.size) if (para >= sections[k].start && para < sections[k].end) return k
         return if (sections.size > 1) sections.size - 1 else 0
     }
 
-    private fun showSection(k: Int, anchorPara: Int, atEnd: Boolean = false) {
+    internal fun showSection(k: Int, anchorPara: Int, atEnd: Boolean = false) {
         if (k < 0 || k >= sections.size) return
         val sec = sections[k]
         curSection = k
@@ -554,7 +557,7 @@ class ReaderActivity : Activity(), BookPageView.Host {
     }
 
     /** Shows the page holding [para] (character [local] inside it). */
-    private fun showPara(para: Int, local: Int) {
+    internal fun showPara(para: Int, local: Int) {
         if (sections.isEmpty()) return
         val k = sectionOf(para)
         if (k != curSection) { showSection(k, para); if (local == 0) return }
@@ -562,15 +565,15 @@ class ReaderActivity : Activity(), BookPageView.Host {
         if (pg != bookView.page) bookView.goToPage(pg)
     }
 
-    private fun bookMarks(): List<BookPageView.Mark> =
+    internal fun bookMarks(): List<BookPageView.Mark> =
         notes.filter { it.type == "hl" }.map { BookPageView.Mark(it.para, it.start, it.end, hlColor(it.color)) }
 
-    private fun showLayout() {
+    internal fun showLayout() {
         list.visibility = if (bookMode) View.GONE else View.VISIBLE
         bookView.visibility = if (bookMode) View.VISIBLE else View.GONE
     }
 
-    private fun setLayoutMode(book: Boolean) {
+    internal fun setLayoutMode(book: Boolean) {
         val at = if (bookMode) bookView.topPara() else list.firstVisiblePosition
         bookMode = book
         Settings.setLayout(this, if (book) "book" else "scroll")
@@ -632,148 +635,13 @@ class ReaderActivity : Activity(), BookPageView.Host {
 
     // ---------- "last time…" recap ----------
 
-    private fun showRecap(prevOpened: Long) {
-        if (prevOpened == 0L || System.currentTimeMillis() - prevOpened < 3_600_000L) return
-        val p = curPara
-        if (p <= 0 || p >= paras.size) return
-        val src = if (paras[p - 1].length > 40) paras[p - 1] else paras[p]
-        val sentence = src.split(Regex("(?<=[.!?…])\\s+")).lastOrNull { it.length > 20 } ?: src
-        val diff = System.currentTimeMillis() - prevOpened
-        val when_ = when {
-            diff < 2 * 86_400_000L && java.util.Calendar.getInstance().apply { timeInMillis = prevOpened }.get(java.util.Calendar.DAY_OF_YEAR) ==
-                java.util.Calendar.getInstance().get(java.util.Calendar.DAY_OF_YEAR) -> "earlier today"
-            diff < 2 * 86_400_000L -> "yesterday"
-            else -> java.text.DateFormat.getDateInstance().format(java.util.Date(prevOpened))
-        }
-        val ch = chapterIndex(p).let { if (it >= 0) chapters[it].title else book.title }
-        recap.text = "Last time ($when_) · $ch\n“${if (sentence.length > 180) sentence.take(180) + "…" else sentence}”\nTap to dismiss · ▶ Play to continue"
-        recap.visibility = View.VISIBLE
-        ui.postDelayed({ recap.visibility = View.GONE }, 20_000)
-    }
-
     // ---------- footnotes ----------
 
-    private var fnDefs: Map<String, List<Int>>? = null
-
-    private fun showFootnote(n: String, from: Int) {
-        val defs = fnDefs ?: HashMap<String, MutableList<Int>>().also { m ->
-            for ((i, p) in paras.withIndex()) {
-                val mt = FN_DEF.find(p)
-                if (mt != null && p.length > mt.value.length + 3) m.getOrPut(mt.groupValues[1]) { ArrayList() } += i
-            }
-            fnDefs = m
-        }
-        val cands = (defs[n] ?: emptyList()).filter { it != from }
-        val i = cands.firstOrNull { it > from } ?: cands.lastOrNull()
-        val dlg = AlertDialog.Builder(this).setTitle("Note $n")
-        if (i == null) {
-            dlg.setMessage("This book's note text couldn't be found.").setPositiveButton("OK", null).show()
-            return
-        }
-        dlg.setMessage(paras[i].replace(FN_DEF, "").trimEnd(']', ' '))
-            .setPositiveButton("Close", null)
-            .setNeutralButton("Go to note") { _, _ -> goTo(i) }
-            .show()
-    }
+    internal var fnDefs: Map<String, List<Int>>? = null
 
     // ---------- appearance ----------
 
-    private fun loadAppearance() {
-        textSize = Settings.textSize(this)
-        themeIndex = Settings.effectiveTheme(this)
-        theme = READER_THEMES.getOrElse(themeIndex) { READER_THEMES[0] }
-        font = FONTS.getOrElse(Settings.font(this)) { FONTS[0] }
-        margin = MARGINS_DP.getOrElse(Settings.margin(this)) { 22 }
-    }
-
-    private fun applyAppearance() {
-        root.setBackgroundColor(theme.bg)
-        list.setBackgroundColor(theme.bg)
-        list.cacheColorHint = theme.bg
-        recap.setTextColor(theme.fg)
-        recap.setBackgroundColor(theme.para)
-        if (::jumpBar.isInitialized) { jumpBar.setTextColor(theme.fg); jumpBar.setBackgroundColor(theme.para) }
-        if (::bookView.isInitialized) {
-            bookView.bg = theme.bg; bookView.fg = theme.fg
-            bookView.muted = (theme.fg and 0x00FFFFFF) or 0x99000000.toInt()
-            bookView.accent = ACCENT; bookView.paraColor = theme.para; bookView.sentColor = theme.sent
-            bookView.marginDp = margin
-            bookView.turnStyle = Settings.pageTurn(this)
-            bookView.justify = Settings.justify(this)
-            bookView.paint.typeface = font
-            bookView.paint.textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, textSize, resources.displayMetrics)
-            if (loaded && bookMode && curSection >= 0) {
-                bookView.relayout(bookMarks())
-                if (service() != null) bookView.setReading(curPara, curStart, curEnd)
-            }
-        }
-        adapter.notifyDataSetChanged()
-    }
-
-    private fun appearanceMenu() {
-        val items = arrayOf(
-            "Theme: ${theme.name}",
-            "Font: ${FONT_NAMES[Settings.font(this).coerceIn(0, 2)]}",
-            "Margins: ${MARGIN_NAMES[Settings.margin(this).coerceIn(0, 2)]}",
-            "Larger text",
-            "Smaller text",
-            "Layout: ${if (bookMode) "Book pages" else "Scrolling"}",
-            "Page turn: ${if (Settings.pageTurn(this) == "flip") "Page flip" else "Slide"}",
-            "Night mode schedule: ${if (Settings.nightOn(this)) "${hm(Settings.nightFrom(this))}–${hm(Settings.nightTo(this))}" else "Off"}"
-        )
-        AlertDialog.Builder(this).setTitle("Appearance").setItems(items) { _, w ->
-            when (w) {
-                0 -> choose("Theme", READER_THEMES.map { it.name }) { Settings.setTheme(this, it) }
-                1 -> choose("Font", FONT_NAMES) { Settings.setFont(this, it) }
-                2 -> choose("Margins", MARGIN_NAMES) { Settings.setMargin(this, it) }
-                3, 4 -> {
-                    Settings.setTextSize(this, (textSize + if (w == 3) 2f else -2f).coerceIn(12f, 34f))
-                    loadAppearance(); applyAppearance(); appearanceMenu()
-                }
-                5 -> { setLayoutMode(!bookMode); appearanceMenu() }
-                6 -> {
-                    Settings.setPageTurn(this, if (Settings.pageTurn(this) == "flip") "slide" else "flip")
-                    bookView.turnStyle = Settings.pageTurn(this)
-                    appearanceMenu()
-                }
-                7 -> nightDialog()
-            }
-        }.show()
-    }
-
-    private fun hm(m: Int) = String.format(Locale.getDefault(), "%d:%02d", m / 60, m % 60)
-
-    /** Switch to a darker theme automatically between two times. */
-    private fun nightDialog() {
-        var on = Settings.nightOn(this)
-        var from = Settings.nightFrom(this)
-        var to = Settings.nightTo(this)
-        var th = Settings.nightTheme(this)
-        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(8), dp(20), 0) }
-        val check = CheckBox(this).apply { text = "Switch theme automatically at night"; isChecked = on }
-        val fromBtn = Button(this); val toBtn = Button(this); val thBtn = Button(this)
-        fun label() {
-            fromBtn.text = "From ${hm(from)}"; toBtn.text = "Until ${hm(to)}"
-            thBtn.text = "Night theme: ${READER_THEMES.getOrElse(th) { READER_THEMES[0] }.name}"
-        }
-        label()
-        fromBtn.setOnClickListener { TimePickerDialog(this, { _, h, m -> from = h * 60 + m; label() }, from / 60, from % 60, false).show() }
-        toBtn.setOnClickListener { TimePickerDialog(this, { _, h, m -> to = h * 60 + m; label() }, to / 60, to % 60, false).show() }
-        thBtn.setOnClickListener {
-            AlertDialog.Builder(this).setItems(READER_THEMES.map { it.name }.toTypedArray()) { _, w -> th = w; label() }.show()
-        }
-        box.addView(check); box.addView(fromBtn); box.addView(toBtn); box.addView(thBtn)
-        AlertDialog.Builder(this).setTitle("Night mode schedule").setView(box)
-            .setPositiveButton("Save") { _, _ ->
-                on = check.isChecked
-                Settings.setNight(this, on, from, to, th)
-                loadAppearance(); applyAppearance()
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
-    }
-
-    private fun choose(titleText: String, options: List<String>, save: (Int) -> Unit) {
+    internal fun choose(titleText: String, options: List<String>, save: (Int) -> Unit) {
         AlertDialog.Builder(this).setTitle(titleText).setItems(options.toTypedArray()) { _, w ->
             save(w)
             loadAppearance()
@@ -784,7 +652,7 @@ class ReaderActivity : Activity(), BookPageView.Host {
 
     // ---------- playback controls ----------
 
-    private fun playFrom(i: Int) {
+    internal fun playFrom(i: Int) {
         if (!loaded) return
         lastTouch = 0
         startForegroundService(
@@ -795,7 +663,7 @@ class ReaderActivity : Activity(), BookPageView.Host {
         )
     }
 
-    private fun togglePlay() {
+    internal fun togglePlay() {
         if (!loaded) return
         if (service() != null) {
             startService(Intent(this, TtsService::class.java).setAction(TtsService.ACTION_TOGGLE))
@@ -808,7 +676,7 @@ class ReaderActivity : Activity(), BookPageView.Host {
         }
     }
 
-    private fun step(d: Int) {
+    internal fun step(d: Int) {
         if (!loaded || paras.isEmpty()) return
         lastTouch = 0
         if (service() != null) {
@@ -820,7 +688,7 @@ class ReaderActivity : Activity(), BookPageView.Host {
     }
 
     /** Moves the reading position without starting playback (unless already playing). */
-    private fun goTo(para: Int, record: Boolean = true) {
+    internal fun goTo(para: Int, record: Boolean = true) {
         if (record) recordJump(para)
         lastTouch = 0
         if (service() != null) {
@@ -839,7 +707,7 @@ class ReaderActivity : Activity(), BookPageView.Host {
 
     // ---------- getting around: 15/30 seconds, repeat, places you jumped from, go to ----------
 
-    private fun seekBy(sec: Int) {
+    internal fun seekBy(sec: Int) {
         if (!loaded) return
         lastTouch = 0
         val s = service()
@@ -853,402 +721,26 @@ class ReaderActivity : Activity(), BookPageView.Host {
         goTo(p, record = false)
     }
 
-    private fun repeatSentence() {
+    internal fun repeatSentence() {
         val s = service()
         if (s != null) s.repeatSentence() else seekBy(-5)
         toast("Again")
     }
 
-    private fun recordJump(to: Int) {
-        if (!loaded) return
-        val from = curPara
-        if (kotlin.math.abs(to - from) < 4) return
-        history.removeAll { kotlin.math.abs(it.first - from) <= 2 }
-        history.add(0, from to System.currentTimeMillis())
-        while (history.size > 12) history.removeAt(history.size - 1)
-        jumpBar.text = "Jumped to a new place.   ↶ Tap to go back"
-        jumpBar.visibility = View.VISIBLE
-        ui.removeCallbacks(hideJump)
-        ui.postDelayed(hideJump, 6000)
-    }
-    private val hideJump = Runnable { jumpBar.visibility = View.GONE }
-
-    private fun goBackTo(k: Int) {
-        val h = history.getOrNull(k) ?: return
-        history.removeAt(k)
-        val here = curPara
-        if (kotlin.math.abs(here - h.first) > 2) history.add(0, here to System.currentTimeMillis())
-        goTo(h.first, record = false)
-    }
-
-    private fun placeLabel(p: Int): String {
-        val pct = (p + 1) * 100 / maxOf(1, paras.size)
-        val ch = chapterIndex(p).let { if (it >= 0) chapters[it].title else "Beginning" }
-        return "$ch · $pct%"
-    }
-
-    private fun showHistory() {
-        if (history.isEmpty()) { toast("No jumps yet. When you jump somewhere, the place you left is kept here."); return }
-        val now = System.currentTimeMillis()
-        val labels = history.map { (p, t) ->
-            val m = ((now - t) / 60000).toInt()
-            "↶ ${placeLabel(p)}  (" + (if (m < 1) "just now" else if (m < 60) "$m min ago" else "${m / 60} h ago") + ")"
-        }.toTypedArray()
-        AlertDialog.Builder(this).setTitle("Places you jumped from").setItems(labels) { _, w -> goBackTo(w) }.show()
-    }
-
-    /** A slider across the whole book that shows the chapter as you drag. */
-    private fun goToDialog() {
-        if (!loaded) return
-        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(12), dp(20), 0) }
-        val label = TextView(this).apply { textSize = 15f }
-        val bar = android.widget.SeekBar(this).apply { max = 1000; progress = curPara * 1000 / maxOf(1, paras.size - 1) }
-        val pctBox = EditText(this).apply { hint = "or type a percent"; inputType = android.text.InputType.TYPE_CLASS_NUMBER }
-        fun paraAt(v: Int) = (v.toLong() * (paras.size - 1) / 1000).toInt()
-        fun show(v: Int) { label.text = placeLabel(paraAt(v)) }
-        show(bar.progress)
-        bar.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(sb: android.widget.SeekBar?, v: Int, fromUser: Boolean) { show(v) }
-            override fun onStartTrackingTouch(sb: android.widget.SeekBar?) {}
-            override fun onStopTrackingTouch(sb: android.widget.SeekBar?) {}
-        })
-        pctBox.addTextChangedListener(object : android.text.TextWatcher {
-            override fun afterTextChanged(e: android.text.Editable?) { e?.toString()?.toIntOrNull()?.let { bar.progress = (it.coerceIn(0, 100) * 10) } }
-            override fun beforeTextChanged(a: CharSequence?, b: Int, c: Int, d: Int) {}
-            override fun onTextChanged(a: CharSequence?, b: Int, c: Int, d: Int) {}
-        })
-        box.addView(label); box.addView(bar, LinearLayout.LayoutParams(MATCH, WRAP)); box.addView(pctBox)
-        AlertDialog.Builder(this).setTitle("Go to").setView(box)
-            .setPositiveButton("Go") { _, _ -> goTo(paraAt(bar.progress)) }
-            .setNegativeButton("Cancel", null).show()
-    }
-
-    // ---------- audio clips with bookmarks ----------
-    private fun saveClip(p: Int) {
-        val s = service()
-        val segText = if (s != null && curPara == p && s.currentSegText() != null) s.currentSegText()!! else paras[p].split(Regex("(?<=[.!?…])\\s+")).let { parts ->
-            var t = ""; for (x in parts) { if (t.length > 60) break; t = (t + " " + x).trim() }; t
-        }
-        val quote = segText.take(400)
-        val text = Speaker(this).spoken(quote) ?: quote
-        toast("Making the clip…")
-        val dir = java.io.File(filesDir, "clips/${book.id}").apply { mkdirs() }
-        val name = "clip-${System.currentTimeMillis()}.wav"
-        val out = java.io.File(dir, name)
-        val nv = Settings.voiceFor(this, book.id)
-        if (NeuralVoices.isNeural(nv)) {
-            Thread {
-                val r = try { NeuralVoices.generate(this, nv!!, text, Settings.rateFor(this, book.id)) } catch (t: Throwable) { null }
-                runOnUiThread {
-                    if (r == null) { toast("Couldn't make the clip."); return@runOnUiThread }
-                    NeuralVoices.writeWav(out, r.first, r.second)
-                    val list = Library.notes(this, book.id)
-                    list += Note(p, "", System.currentTimeMillis(), "clip", 0, 0, "yellow", quote, name)
-                    Library.saveNotes(this, book.id, list); reloadNotes()
-                    toast("Saved the clip with a bookmark. Find it in Bookmarks & notes.")
-                }
-            }.start()
-            return
-        }
-        val engine = TextToSpeech(this, null)
-        engine.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
-            override fun onStart(id: String?) {}
-            override fun onDone(id: String?) {
-                runOnUiThread {
-                    engine.shutdown()
-                    val list = Library.notes(this@ReaderActivity, book.id)
-                    list += Note(p, "", System.currentTimeMillis(), "clip", 0, 0, "yellow", quote, name)
-                    Library.saveNotes(this@ReaderActivity, book.id, list)
-                    reloadNotes()
-                    toast("Saved the clip with a bookmark. Find it in Bookmarks & notes.")
-                }
-            }
-            @Deprecated("Deprecated in Java")
-            override fun onError(id: String?) { runOnUiThread { engine.shutdown(); toast("Couldn't make the clip.") } }
-        })
-        // wait for the engine, then speak to a file with this book's voice and speed
-        ui.postDelayed(object : Runnable {
-            var tries = 0
-            override fun run() {
-                if (engine.voices == null && tries++ < 20) { ui.postDelayed(this, 150); return }
-                VoiceNames.apply(engine, Settings.voiceFor(this@ReaderActivity, book.id))
-                engine.setSpeechRate(Settings.rateFor(this@ReaderActivity, book.id))
-                engine.synthesizeToFile(text, Bundle(), out, "clip")
-            }
-        }, 300)
-    }
-
-    private fun playClip(n: Note) {
-        val f = java.io.File(filesDir, "clips/${book.id}/${n.file}")
-        if (!f.exists()) { toast("This clip was made on another device."); return }
-        if (service()?.playing == true) togglePlay()
-        try {
-            android.media.MediaPlayer().apply { setDataSource(f.path); setOnCompletionListener { it.release() }; prepare(); start() }
-        } catch (t: Throwable) { toast("Couldn't play the clip.") }
-    }
-
-    private fun shareClip(n: Note) {
-        val uri = android.net.Uri.parse("content://${packageName}.clips/${book.id}/${n.file}")
-        val send = Intent(Intent.ACTION_SEND).setType("audio/wav")
-            .putExtra(Intent.EXTRA_STREAM, uri)
-            .putExtra(Intent.EXTRA_TEXT, "“${n.quote}” — ${book.title}")
-            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        startActivity(Intent.createChooser(send, "Share clip"))
-    }
-
-    private fun pickSpeed() {
-        val rates = floatArrayOf(0.75f, 1f, 1.25f, 1.5f, 1.75f, 2f, 2.5f, 3f)
-        AlertDialog.Builder(this)
-            .setTitle("Reading speed for this book")
-            .setItems(rates.map { fmtRate(it) }.toTypedArray()) { _, w ->
-                Settings.setBookRate(this, book.id, rates[w])
-                TtsService.instance?.applySettings(true)
-                refreshButtons()
-            }
-            .show()
-    }
+    internal val hideJump = Runnable { jumpBar.visibility = View.GONE }
 
     // ---------- chapters ----------
 
-    private fun showChapters() {
-        if (!loaded) return
-        if (chapters.isEmpty()) { toast("No chapters were found in this book."); return }
-        val cur = chapterIndex(curPara)
-        sheet("Contents · ${chapters.size} chapters", chapters.mapIndexed { k, c ->
-            val pct = (c.para + 1) * 100 / maxOf(1, paras.size)
-            SheetRow(if (k == cur) "▶" else if (c.level == 1) "  ·" else "📖", (if (c.level == 1) "   " else "") + prettyChapter(c.title), if (k == cur) "You're here · $pct%" else "$pct%") { goTo(chapters[k].para) }
-        }, scrollTo = cur)
-    }
-
     // ---------- sleep timer ----------
 
-    private fun sleepMenu() {
-        val labels = arrayOf("Off", "5 minutes", "15 minutes", "30 minutes", "45 minutes", "1 hour", "End of this chapter")
-        val minutes = intArrayOf(0, 5, 15, 30, 45, 60, -1)
-        AlertDialog.Builder(this).setTitle("Sleep timer").setItems(labels) { _, w ->
-            val i = Intent(this, TtsService::class.java)
-                .setAction(TtsService.ACTION_SLEEP)
-                .putExtra(TtsService.EXTRA_MINUTES, minutes[w])
-            if (TtsService.instance == null) {
-                if (minutes[w] == 0) return@setItems
-                i.putExtra(TtsService.EXTRA_BOOK, book.id)
-                startForegroundService(i)
-            } else {
-                startService(i)
-            }
-            toast(if (minutes[w] == 0) "Sleep timer off" else "Sleep timer: ${labels[w].lowercase()}")
-        }.show()
-    }
-
     // ---------- bookmarks & notes ----------
-
-    private fun reloadNotes() {
-        notes = Library.notes(this, book.id)
-        val m = HashMap<Int, String>()
-        for (n in notes) if (n.type != "hl" || n.text.isNotBlank()) m[n.para] = if (n.text.isBlank() && m[n.para] == null) "🔖 " else "📝 "
-        marks = m
-        adapter.notifyDataSetChanged()
-        if (bookMode && curSection > 0) {
-            bookView.relayout(bookMarks())
-            if (service() != null) bookView.setReading(curPara, curStart, curEnd)
-        }
-    }
-
-    private fun paragraphMenu(p: Int) {
-        val here = notes.filter { it.para == p }
-        val refs = FN_REF.findAll(paras[p]).map { it.groupValues[1] }.distinct().toList()
-        val rows = ArrayList<SheetRow?>()
-        rows += SheetRow("▶", "Read aloud from here") { playFrom(p) }
-        rows += SheetRow("🔖", "Bookmark this paragraph") { saveNote(p, ""); toast("Bookmarked") }
-        rows += SheetRow("📝", "Add a note…") { addNote(p) }
-        rows += SheetRow("🖍", "Highlight, define or note a passage…", "Select the exact words") { selectIn(p) }
-        rows += SheetRow("🎙", "Bookmark with an audio clip", "Saves this sentence spoken aloud, to play or share") { saveClip(p) }
-        rows += SheetRow("📋", "Copy text") {
-            (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager)
-                .setPrimaryClip(ClipData.newPlainText("Shelf Reader", paras[p]))
-            toast("Copied")
-        }
-        for (r in refs) rows += SheetRow("†", "Show note [$r]") { showFootnote(r, p) }
-        if (here.isNotEmpty()) {
-            rows += null
-            rows += SheetRow("🗑", "Remove bookmark / notes / highlights here") {
-                notes.filter { it.para == p && it.type == "clip" }.forEach { java.io.File(filesDir, "clips/${book.id}/${it.file}").delete() }
-                Library.saveNotes(this, book.id, notes.filter { it.para != p })
-                reloadNotes()
-            }
-        }
-        sheet(paras[p].take(80) + if (paras[p].length > 80) "…" else "", rows)
-    }
-
-    private fun saveNote(p: Int, text: String) {
-        val list = Library.notes(this, book.id)
-        list += Note(p, text, System.currentTimeMillis())
-        Library.saveNotes(this, book.id, list)
-        reloadNotes()
-    }
-
-    private fun addNote(p: Int) {
-        val box = EditText(this).apply {
-            hint = "Your note"
-            minLines = 2
-        }
-        val wrap = LinearLayout(this).apply {
-            setPadding(dp(20), dp(8), dp(20), 0)
-            addView(box, LinearLayout.LayoutParams(MATCH, WRAP))
-        }
-        AlertDialog.Builder(this)
-            .setTitle("Note")
-            .setView(wrap)
-            .setPositiveButton("Save") { _, _ ->
-                val t = box.text.toString().trim()
-                if (t.isNotEmpty()) saveNote(p, t)
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
-    }
-
-    private fun showNotes() {
-        if (notes.isEmpty()) {
-            toast("No bookmarks, notes or highlights yet. Long-press a paragraph to add one.")
-            return
-        }
-        val labels = notes.map { n ->
-            val where = chapterIndex(n.para).let { if (it >= 0) chapters[it].title else "Paragraph ${n.para + 1}" }
-            val body = when {
-                n.type == "clip" -> "🔊 “" + n.quote.take(90) + "”"
-                n.type == "hl" -> "🖍 “" + n.quote.take(90) + "”" + if (n.text.isNotBlank()) "\n📝 " + n.text else ""
-                n.text.isBlank() -> "🔖 " + paras.getOrElse(n.para) { "" }.take(70)
-                else -> "📝 " + n.text
-            }
-            "$where\n$body"
-        }.toTypedArray()
-        AlertDialog.Builder(this).setTitle("Bookmarks, notes & highlights")
-            .setPositiveButton("Export…") { _, _ -> exportNotes() }
-            .setItems(labels) { _, w ->
-            val n = notes[w]
-            if (n.type == "clip") {
-                AlertDialog.Builder(this).setTitle("Audio clip").setMessage("“${n.quote}”")
-                    .setPositiveButton("▶ Play") { _, _ -> playClip(n) }
-                    .setNeutralButton("Share…") { _, _ -> shareClip(n) }
-                    .setNegativeButton("Delete") { _, _ ->
-                        java.io.File(filesDir, "clips/${book.id}/${n.file}").delete()
-                        Library.saveNotes(this, book.id, notes.filter { it !== n }); reloadNotes()
-                    }.show()
-                return@setItems
-            }
-            AlertDialog.Builder(this)
-                .setTitle(if (n.type == "hl") "Highlight" else if (n.text.isBlank()) "Bookmark" else "Note")
-                .setMessage(if (n.type == "hl") "“${n.quote}”" + (if (n.text.isNotBlank()) "\n\n${n.text}" else "")
-                    else if (n.text.isBlank()) paras.getOrElse(n.para) { "" }.take(300) else n.text)
-                .setPositiveButton("Go there") { _, _ -> goTo(n.para) }
-                .setNeutralButton("Delete") { _, _ ->
-                    Library.saveNotes(this, book.id, notes.filter { it !== n })
-                    reloadNotes()
-                }
-                .setNegativeButton("Close", null)
-                .show()
-        }.show()
-    }
 
     // ---------- voices ----------
 
     // ---------- voices: one screen for natural (Kokoro / Piper) and phone voices ----------
-    private var voicePickerOpen = false
-
-    private fun pickVoice() {
-        if (voicePickerOpen) return
-        // A separate engine is used for listing and previewing phone voices, so previews don't disturb playback.
-        val p = probe
-        if (p != null && probeReady) { showVoices(p); return }
-        status.text = "Loading voices…"
-        if (p == null) {
-            probe = TextToSpeech(this) { st ->
-                runOnUiThread {
-                    if (isFinishing || isDestroyed) return@runOnUiThread
-                    probeReady = st == TextToSpeech.SUCCESS
-                    showVoices(if (probeReady) probe else null)
-                    refresh()
-                }
-            }
-        }
-    }
-
-    private fun showVoices(engine: TextToSpeech?) {
-        if (voicePickerOpen || isFinishing || isDestroyed) return
-        val wasPlaying = isPlaying()
-        if (wasPlaying) startService(Intent(this, TtsService::class.java).setAction(TtsService.ACTION_PAUSE))
-        voicePickerOpen = true
-        VoicePicker(this, book.id, { sampleSentence() }, engine, { e, v -> preview(e, v) }, { openTtsSettings() }) {
-            voicePickerOpen = false
-            // carry on reading if it was playing before (now with the chosen voice)
-            if (wasPlaying && !isFinishing && !isPlaying()) startService(Intent(this, TtsService::class.java).setAction(TtsService.ACTION_TOGGLE))
-            refresh()
-        }.show()
-    }
-
-    /** A line from where you are in the book, to hear a downloaded voice read it. */
-    private fun sampleSentence(): String {
-        val start = currentPara().coerceIn(0, maxOf(0, paras.size - 1))
-        for (i in start until minOf(paras.size, start + 30)) {
-            val t = paras[i].replace(Regex("\\s+"), " ").trim()
-            if (t.count { it.isLetter() } < 25) continue
-            val end = Regex("[.!?…][”\"’)]?\\s").find(t, 40)?.range?.last ?: -1
-            return (if (end in 40..240) t.substring(0, end + 1) else t.take(200).substringBeforeLast(' ') + "…").trim()
-        }
-        return "Hello! This is how I would sound reading ${book.title}."
-    }
-
-    private fun preview(engine: TextToSpeech, v: Voice?) {
-        try {
-            engine.stop()
-            val used = VoiceNames.apply(engine, v?.name)
-            if (v != null && used == null) {
-                toast("This voice isn't installed on your phone yet, so you'd hear the default voice. Tap “Get more voices…” to download it.")
-                return
-            }
-            if (v != null && used != null && used.name != v.name) {
-                toast(if (used.isNetworkConnectionRequired) "Using the online version of this voice." else "Using the offline version of this voice.")
-            }
-            engine.setSpeechRate(Settings.rateFor(this, book.id))
-            engine.speak("Hello! This is how I'll sound reading your book.", TextToSpeech.QUEUE_FLUSH, null, "preview")
-        } catch (e: Throwable) {
-            toast("Couldn't play a preview of that voice.")
-        }
-    }
-
-    private fun openTtsSettings() {
-        try {
-            startActivity(Intent("com.android.settings.TTS_SETTINGS"))
-        } catch (e: Throwable) {
-            toast("Open Settings → Accessibility → Text-to-speech to install voices.")
-        }
-    }
+    internal var voicePickerOpen = false
 
     // ---------- audio export ----------
-
-    private fun exportMenu() {
-        if (!loaded) return
-        if (ExportService.running) { toast("An export is already running — see the notification."); return }
-        val cur = chapterIndex(curPara).coerceAtLeast(0)
-        val count = maxOf(1, chapters.size)
-        val options = arrayOf(
-            if (chapters.isEmpty()) "Whole book (one file)" else "This chapter",
-            "Whole book (${count} file${if (count == 1) "" else "s"}, one per chapter)"
-        )
-        AlertDialog.Builder(this)
-            .setTitle("Export as audio")
-            .setItems(options) { _, w ->
-                pendingExport = if (w == 0) cur to cur else 0 to count - 1
-                toast("Pick a folder to save the audio files in.")
-                try {
-                    @Suppress("DEPRECATION")
-                    startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE), 43)
-                } catch (e: Throwable) {
-                    toast("No folder picker available")
-                }
-            }
-            .show()
-    }
 
     @Deprecated("Deprecated in Java")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
@@ -1274,153 +766,18 @@ class ReaderActivity : Activity(), BookPageView.Host {
 
     // ---------- word lookup ----------
 
-    /** Shows the paragraph with selectable text: pick words, then Define, a highlighter colour, or Note. */
-    private fun selectIn(p: Int) {
-        val text = paras[p]
-        val tv = TextView(this).apply {
-            this.text = text
-            textSize = 18f
-            setTextIsSelectable(true)
-            setPadding(dp(20), dp(12), dp(20), dp(12))
-        }
-        var dlg: AlertDialog? = null
-        tv.customSelectionActionModeCallback = object : ActionMode.Callback {
-            override fun onCreateActionMode(mode: ActionMode, menu: Menu): Boolean {
-                menu.clear()
-                menu.add(0, 99, 0, "Define")
-                menu.add(0, 100, 1, "Yellow")
-                menu.add(0, 101, 2, "Green")
-                menu.add(0, 102, 3, "Pink")
-                menu.add(0, 103, 4, "Note")
-                menu.add(0, 104, 5, "Copy")
-                return true
-            }
-            override fun onPrepareActionMode(mode: ActionMode, menu: Menu) = false
-            override fun onActionItemClicked(mode: ActionMode, item: MenuItem): Boolean {
-                val a = maxOf(0, minOf(tv.selectionStart, tv.selectionEnd)); val b = maxOf(0, maxOf(tv.selectionStart, tv.selectionEnd))
-                val sel = text.substring(a.coerceAtMost(text.length), b.coerceAtMost(text.length))
-                mode.finish()
-                if (sel.isBlank()) return true
-                when (item.itemId) {
-                    99 -> define(sel)
-                    100, 101, 102 -> { addHighlight(p, a, b, HL_NAMES[item.itemId - 100], ""); dlg?.dismiss(); toast("Highlighted") }
-                    103 -> { dlg?.dismiss(); highlightNote(p, a, b) }
-                    104 -> {
-                        (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("Shelf Reader", sel))
-                        toast("Copied")
-                    }
-                }
-                return true
-            }
-            override fun onDestroyActionMode(mode: ActionMode) {}
-        }
-        val scroll = ScrollView(this).apply { addView(tv) }
-        dlg = AlertDialog.Builder(this)
-            .setTitle("Press and hold, drag to select, then pick")
-            .setView(scroll)
-            .setNegativeButton("Close", null)
-            .show()
-    }
-
-    private fun addHighlight(p: Int, a: Int, b: Int, color: String, note: String) {
-        val l = Library.notes(this, book.id)
-        l += Note(p, note, System.currentTimeMillis(), "hl", a, b, color, paras[p].substring(a, b))
-        Library.saveNotes(this, book.id, l)
-        reloadNotes()
-    }
-
-    private fun highlightNote(p: Int, a: Int, b: Int) {
-        val box = EditText(this).apply { hint = "Your note"; minLines = 2 }
-        val wrap = LinearLayout(this).apply { setPadding(dp(20), dp(8), dp(20), 0); addView(box, LinearLayout.LayoutParams(MATCH, WRAP)) }
-        AlertDialog.Builder(this).setTitle("Note on “${paras[p].substring(a, b).take(60)}”").setView(wrap)
-            .setPositiveButton("Save") { _, _ -> addHighlight(p, a, b, "yellow", box.text.toString().trim()) }
-            .setNegativeButton("Cancel", null)
-            .show()
-    }
-
-    /** Shares your highlights, notes and bookmarks as a Markdown text (save it to Drive, email it, etc.). */
-    private fun exportNotes() {
-        val all = Library.notes(this, book.id).sortedBy { it.para * 100000 + it.start }
-        if (all.isEmpty()) { toast("Nothing to export yet."); return }
-        val sb = StringBuilder("# ${book.title}\n")
-        if (book.author.isNotBlank()) sb.append("*${book.author}*\n")
-        sb.append("\n")
-        var lastCh = -2
-        for (n in all) {
-            val ch = chapterIndex(n.para)
-            if (ch != lastCh) { sb.append("\n## ${if (ch >= 0) chapters[ch].title else "Beginning"}\n\n"); lastCh = ch }
-            when {
-                n.type == "hl" -> { sb.append("> ${n.quote}\n"); if (n.text.isNotBlank()) sb.append("\n${n.text}\n"); sb.append("\n") }
-                n.text.isBlank() -> sb.append("- Bookmark: ${paras.getOrElse(n.para) { "" }.take(120)}…\n\n")
-                else -> sb.append("- Note: ${n.text}\n  (at: ${paras.getOrElse(n.para) { "" }.take(80)}…)\n\n")
-            }
-        }
-        val send = Intent(Intent.ACTION_SEND).setType("text/plain")
-            .putExtra(Intent.EXTRA_SUBJECT, "${book.title} — highlights & notes")
-            .putExtra(Intent.EXTRA_TEXT, sb.toString())
-        startActivity(Intent.createChooser(send, "Export highlights & notes"))
-    }
-
-    private fun define(word: String) {
-        val w = word.trim().split(Regex("\\s+")).firstOrNull()?.trim { !it.isLetter() } ?: return
-        if (w.isEmpty()) return
-        toast("Looking up “$w”…")
-        Thread {
-            val result = try { Dictionary.define(w) } catch (t: Throwable) { "Couldn't look that up: ${t.message}" }
-            runOnUiThread {
-                AlertDialog.Builder(this).setTitle(w).setMessage(result).setPositiveButton("OK", null).show()
-            }
-        }.start()
-    }
-
     // ---------- search in book ----------
-
-    private fun searchInBook() {
-        if (!loaded) return
-        val box = EditText(this).apply { hint = "Word or phrase"; isSingleLine = true }
-        val wrap = LinearLayout(this).apply {
-            setPadding(dp(20), dp(8), dp(20), 0)
-            addView(box, LinearLayout.LayoutParams(MATCH, WRAP))
-        }
-        AlertDialog.Builder(this)
-            .setTitle("Search in this book")
-            .setView(wrap)
-            .setPositiveButton("Search") { _, _ -> showSearchResults(box.text.toString().trim()) }
-            .setNegativeButton("Cancel", null)
-            .show()
-    }
-
-    private fun showSearchResults(q: String) {
-        if (q.length < 2) return
-        val hits = ArrayList<Int>()
-        for ((i, p) in paras.withIndex()) {
-            if (p.contains(q, ignoreCase = true)) { hits += i; if (hits.size >= 300) break }
-        }
-        if (hits.isEmpty()) { toast("“$q” wasn't found in this book."); return }
-        val labels = hits.map { i ->
-            val p = paras[i]
-            val at = p.indexOf(q, ignoreCase = true)
-            val from = maxOf(0, at - 40)
-            val snippet = (if (from > 0) "…" else "") + p.substring(from, minOf(p.length, at + q.length + 60)) + "…"
-            val ch = chapterIndex(i).let { if (it >= 0) chapters[it].title else "Paragraph ${i + 1}" }
-            "$ch\n$snippet"
-        }.toTypedArray()
-        AlertDialog.Builder(this)
-            .setTitle("${hits.size}${if (hits.size >= 300) "+" else ""} matches for “$q”")
-            .setItems(labels) { _, w -> goTo(hits[w]) }
-            .show()
-    }
 
     // ---------- collections ----------
 
-    private fun collectionsDialog() {
+    internal fun collectionsDialog() {
         editCollections(this, book.id) {}
     }
 
     // ---------- menu ----------
 
     /** Everything else, grouped, with clear names. */
-    private fun moreSheet() {
+    internal fun moreSheet() {
         sheet(book.title, listOf(
             SheetRow("🧭", "Go to…", "Slider or percentage, with chapter names") { action(17) },
             SheetRow("↶", "Places you jumped from", "Undo an accidental jump") { action(18) },
@@ -1468,27 +825,8 @@ class ReaderActivity : Activity(), BookPageView.Host {
         ))
     }
 
-    /** Text size, theme and layout in one place (you can also pinch the text to resize it). */
-    private fun lookSheet() {
-        sheet("Text and look · tip: pinch the page to zoom", listOf(
-            SheetRow("A+", "Bigger text", "Now ${textSize.toInt()}") { changeTextSize(2f); lookSheet() },
-            SheetRow("A−", "Smaller text", "Now ${textSize.toInt()}") { changeTextSize(-2f); lookSheet() },
-            SheetRow("🎨", "Theme: ${theme.name}", "Dark, light, sepia or black") {
-                AlertDialog.Builder(this).setItems(READER_THEMES.map { it.name }.toTypedArray()) { _, w -> Settings.setTheme(this, w); loadAppearance(); applyAppearance() }.show()
-            },
-            SheetRow(if (bookMode) "📜" else "📖", if (bookMode) "Switch to scrolling" else "Switch to book pages", if (bookMode) "One long page" else "Swipe or tap the edges to turn pages") { setLayoutMode(!bookMode) },
-            SheetRow("☰", "Straight right edge (justified)", "Off: even word spacing, easier on narrow screens", Settings.justify(this)) { Settings.setJustify(this, !Settings.justify(this)); loadAppearance(); applyAppearance() },
-            SheetRow("🔠", "Font, margins, page turn, night mode…") { appearanceMenu() }
-        ))
-    }
-
-    private fun changeTextSize(d: Float) {
-        Settings.setTextSize(this, (textSize + d).coerceIn(12f, 40f))
-        loadAppearance(); applyAppearance()
-    }
-
     // pinch anywhere on the page to make the text bigger or smaller
-    private val scaler by lazy {
+    internal val scaler by lazy {
         android.view.ScaleGestureDetector(this, object : android.view.ScaleGestureDetector.SimpleOnScaleGestureListener() {
             override fun onScaleBegin(d: android.view.ScaleGestureDetector): Boolean { pinching = true; pinchSize = textSize; return true }
             override fun onScale(d: android.view.ScaleGestureDetector): Boolean {
@@ -1504,7 +842,7 @@ class ReaderActivity : Activity(), BookPageView.Host {
         })
     }
 
-    private fun action(id: Int): Boolean {
+    internal fun action(id: Int): Boolean {
         when (id) {
             1 -> showChapters()
             2 -> showNotes()
@@ -1545,8 +883,8 @@ class ReaderActivity : Activity(), BookPageView.Host {
     }
 }
 
-private const val ACCENT = 0xFF4A90E2.toInt()
-private val HL_NAMES = listOf("yellow", "green", "pink")
+internal const val ACCENT = 0xFF4A90E2.toInt()
+internal val HL_NAMES = listOf("yellow", "green", "pink")
 /** A footnote marker in the text, like [3]. */
 val FN_REF = Regex("\\[(\\d{1,3}|[*†‡])\\]")
 /** The start of a footnote's own paragraph, like "3." or "[3]" or "Footnote 3:". */

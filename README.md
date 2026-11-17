@@ -226,19 +226,26 @@ You can also **import** your own DRM-free **EPUB, PDF or TXT** files.
 
 ## Updates
 
-Every push to `main` builds a new APK automatically and publishes it as a new release.
+Every push to `main` is built, tested and published as a release:
 
-Inside the app, **Menu → Check for updates** (it also checks on its own every few hours) downloads the newest release and installs it over the current one. Your library is kept. Android will ask once to allow Shelf Reader to install apps.
+1. The build runs the quick tests: the "hard cases" book (`tools/torture.txt`) through the phone's and PC's reading rules, and a check that the phone and PC read the same examples (`tools/parity-cases.txt`) the same way. If any fail, nothing is published.
+2. The APK and Windows installer are published as a **Beta** (a pre-release).
+3. An Android emulator reads the whole hard-cases book, with the phone's voice and with a Piper voice. When both reach the end, the build becomes the **Stable** release.
 
-> ⚠️ In-app updates read the public GitHub Releases API, so they **only work when this repository is public**. While it's private, download new APKs from the Releases page instead.
+Both apps update themselves. They follow **Stable** unless you choose **Beta** (phone: Settings → Update channel; PC: Settings → Updates → Beta updates). Your library is kept. Android asks once to allow Shelf Reader to install apps.
 
----
+### Signing key (phone app)
 
-## Tips
+Android only installs an update over the app if both are signed with the same key. The build reads the key from two repository secrets (Settings → Secrets and variables → Actions):
 
-- **Better voices:** go to *Settings → Accessibility → Text-to-speech*, choose *Speech Services by Google*, and download the high-quality voice for your language. Then pick it under *Voice* in the reader.
-- **Tap any paragraph** to start reading from there.
-- If reading stops when your screen is off, set Shelf Reader's battery usage to *Unrestricted* in Android's app settings.
+- `SHELF_KEYSTORE_B64`: the keystore file, base64-encoded
+- `SHELF_KEYSTORE_PASSWORD`: its password
+
+Never put the key or its password in the repository itself. Without the secrets, the build uses the older key file in `app/`.
+
+### Main branch
+
+Changes reach `main` through pull requests whose build passed (Settings → Branches → protect `main`: require a pull request and the `build` check).
 
 ---
 
@@ -259,8 +266,13 @@ The app is plain Kotlin with the Android framework. Its only library is [pdfbox-
 
 | File | Purpose |
 |---|---|
-| `MainActivity.kt` | Library (shelf, grid, list), search, import, updates |
-| `ReaderActivity.kt` | Reader, chapters, bookmarks, appearance, sleep timer |
+| `MainActivity.kt` | Library (shelf, grid, list), tabs, import |
+| `MainSettings.kt`, `MainUpdates.kt`, `MainFindBooks.kt`, `MainBookActions.kt` | Settings and sync, updates, finding and downloading books, book menu |
+| `ReaderActivity.kt` | Reader screen, pages, player controls |
+| `ReaderNavigation.kt`, `ReaderNotes.kt`, `ReaderLook.kt`, `ReaderVoices.kt`, `ReaderClips.kt` | Contents, history and search; notes and highlights; look and night mode; voice, speed and sleep; audio clips |
+| `NeuralVoices.kt` | Natural offline voices (Kokoro, Piper) with sherpa-onnx |
+| `SpeechText.kt` | Spoken-text rules shared with the PC app (`desktop/ui/speechtext.js`) |
+| `CrashReport.kt` | Crash log, event log and Report a problem |
 | `TtsService.kt` | Background read-aloud, notification, media session, Android Auto |
 | `Sources.kt` | Book source searches |
 | `Extract.kt` | EPUB, PDF and TXT text and chapter extraction |
