@@ -112,3 +112,21 @@ internal fun MainActivity.installUpdate(r: Updater.Release) {
         }
     }
 }
+
+/** The update is signed with Shelf Reader's new key, so Android can't install it over this copy. Walks through the one-time reinstall. */
+internal fun MainActivity.reinstallDialog() {
+    AlertDialog.Builder(this)
+        .setTitle("One-time reinstall needed")
+        .setMessage("Shelf Reader's updates are now signed with a new, safer key. Android only installs an update over the app " +
+            "when the keys match, so this one time:\n\n" +
+            "1. Back up your library (button below). Save the file somewhere you can find it, like Downloads.\n" +
+            "2. Download the new ShelfReader.apk from the releases page.\n" +
+            "3. Uninstall Shelf Reader, then open the downloaded APK to install it.\n" +
+            "4. In the new app: Settings → Restore library, and pick the backup.\n\n" +
+            "Downloaded books, natural voices and settings are restored from the backup or downloaded again. After this, updates install normally.")
+        .setPositiveButton("Back up now") { _, _ -> backupLibrary() }
+        .setNeutralButton("Releases page") { _, _ ->
+            try { startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://github.com/${Updater.REPO}/releases/latest"))) } catch (_: Throwable) {}
+        }
+        .setNegativeButton("Later", null).show()
+}

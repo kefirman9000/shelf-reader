@@ -118,6 +118,7 @@ class MainActivity : Activity() {
         intent?.getStringExtra("selftest_voice")?.let { SelfTest.run(applicationContext, it) }
         intent?.getStringExtra("selftest_read")?.let { SelfTest.read(applicationContext, it.ifBlank { null }?.takeIf { v -> v != "default" }) }
         if (intent?.getStringExtra("selftest_voice") == null && intent?.getStringExtra("selftest_read") == null) CrashReport.check(this)
+        if (intent?.getBooleanExtra("reinstall_needed", false) == true) reinstallDialog()
 
         window.statusBarColor = UiColors.SURFACE
         window.navigationBarColor = UiColors.SURFACE
@@ -341,6 +342,11 @@ class MainActivity : Activity() {
 
         if (System.currentTimeMillis() - Settings.lastUpdateCheck(this) > 6 * 60 * 60 * 1000L) checkUpdates(false)
         if (!Settings.seenVoiceGuide(this)) showVoiceGuide(this)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        if (intent.getBooleanExtra("reinstall_needed", false)) reinstallDialog()
     }
 
     override fun onResume() {

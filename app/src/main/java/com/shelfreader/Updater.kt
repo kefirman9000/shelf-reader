@@ -90,6 +90,13 @@ class UpdateReceiver : BroadcastReceiver() {
                 try { context.startActivity(confirm) } catch (t: Throwable) { context.toast("Couldn't open the installer.") }
             }
             PackageInstaller.STATUS_SUCCESS -> {}
+            PackageInstaller.STATUS_FAILURE_CONFLICT, PackageInstaller.STATUS_FAILURE_INCOMPATIBLE -> {
+                // signed with a different key (the app's key was replaced once, Nov 2026): explain the one-time reinstall
+                try {
+                    context.startActivity(Intent(context, MainActivity::class.java)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP).putExtra("reinstall_needed", true))
+                } catch (_: Throwable) { context.toast("This update needs a one-time reinstall: back up your library, uninstall Shelf Reader, then install the new version.") }
+            }
             else -> {
                 val msg = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE) ?: "unknown error"
                 context.toast("Update not installed: $msg")
