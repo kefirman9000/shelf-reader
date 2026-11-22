@@ -57,6 +57,9 @@ android {
         }
     }
 
+    // the read test uses the real release build, plus the "hard cases" test book (-PtestAssets; never in releases)
+    if (project.hasProperty("testAssets")) sourceSets.getByName("release").assets.srcDir("src/debug/assets")
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
