@@ -2,6 +2,8 @@
 
 An Android ebook reader that finds free, legal books and **reads them aloud** with your phone's natural voices, including Google's. It keeps reading with the screen off, like an audiobook.
 
+💖 **Like Shelf Reader?** You can support it on [GitHub Sponsors](https://github.com/sponsors/kefirman9000).
+
 
 ## On your phone
 
@@ -131,7 +133,7 @@ These work on the phone, on the PC, and in the audiobook maker.
 2. Open the file. If Android asks, allow installs from your browser or file manager.
 3. Done. After that, the app can update itself (see [Updates](#updates)).
 
-> Requires Android 8.0 or newer.
+> Requires Android 8.0 or newer. For an older 32-bit phone, download **`ShelfReader-32bit.apk`** instead (the app's updates pick the right one by themselves).
 
 ### Windows
 1. Open the **[latest release](../../releases/latest)** on your PC.
@@ -285,5 +287,12 @@ The app is plain Kotlin with the Android framework. Its only library is [pdfbox-
 | `Backup.kt` | Backup and restore, dictionary lookups |
 | `VoiceNames.kt` | Readable voice names |
 | `desktop/` | Windows app (Electron): `server.js` local library server, `ui/` screens, `lib/` extraction, sources, storage, MP3 export |
+| `desktop/ui/app.js`, `app-reader.js`, `app-player.js`, `app-tools.js`, `app-start.js` | PC app screens, in load order: library and search; book loading and reader; speech, voices and player; getting around, menus and settings; updates, start-up and the event log |
+| `desktop/ui/maker*.js` | Audiobook maker: reading books (`maker.js`), voices, dialogue and sound, making and exporting |
 | `desktop/ui/engines.js` | Kokoro, Piper and premium cloud voices; natural-voice MP3 export |
 | `desktop/lib/cloud.js` | OpenAI, ElevenLabs, Azure and Google Cloud voice connections |
+| `AmbienceSynth.kt`, `Ambience.kt`, `AmbiencePicker.kt` · `desktop/ui/ambience*.js` | Background sounds (rain, waves, fire, noise…): the sounds, playing them under the voice, and the mixer screen |
+
+## Support
+
+Shelf Reader is free. If it's useful to you, you can support it on [GitHub Sponsors](https://github.com/sponsors/kefirman9000). Thank you!

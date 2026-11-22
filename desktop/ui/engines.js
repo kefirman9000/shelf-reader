@@ -208,6 +208,33 @@ function extraVoiceOptions() {
 }
 
 // ---------- Voice options window ----------
+// Ready-made samples, to hear a voice before downloading it (made by the "Voice samples" workflow;
+// Piper voices without one use the sample published with the voice itself).
+const SAMPLE_BASE = 'https://raw.githubusercontent.com/kefirman9000/shelf-reader/voice-samples/';
+const SAMPLE = new Audio();
+function playSample(urls, btn) {
+  const list = urls.filter(Boolean);
+  const reset = (b) => { b.textContent = b.dataset.label || '▶ Sample'; };
+  if (!SAMPLE.paused && SAMPLE.dataset.btn && btn && SAMPLE.dataset.btn === btn.dataset.sid) { SAMPLE.pause(); reset(btn); return; }
+  document.querySelectorAll('[data-sid]').forEach(reset);
+  let k = 0;
+  const next = () => {
+    if (k >= list.length) { if (btn) reset(btn); toast("Couldn't load the sample (it needs internet)."); return; }
+    SAMPLE.src = list[k++];
+    SAMPLE.play().then(() => { if (btn) btn.textContent = '■ Stop'; }).catch(next);
+  };
+  SAMPLE.onerror = next;
+  SAMPLE.onended = () => { if (btn) reset(btn); };
+  SAMPLE.dataset.btn = btn ? btn.dataset.sid : '';
+  if (btn) btn.textContent = '⏳';
+  next();
+}
+const piperSampleUrls = (v) => {
+  const onnx = Object.keys(v.files || {}).find((f) => f.endsWith('.onnx'));
+  return [SAMPLE_BASE + `vits-piper-${v.key}-0.mp3`,
+    onnx ? 'https://huggingface.co/rhasspy/piper-voices/resolve/main/' + onnx.replace(/[^/]+$/, '') + 'samples/speaker_0.mp3' : null];
+};
+
 async function openVoiceOptions() {
   const gpu = !!(navigator.gpu && await navigator.gpu.requestAdapter().catch(() => null));
   await piperCatalog().catch(() => {});
@@ -220,14 +247,16 @@ async function openVoiceOptions() {
     const have = ENG.piper.stored.includes(v.key);
     return `<div class="fix" data-pv="${esc(v.key)}"><span style="flex:1">${esc(piperLabel(v))} <span class="muted">(${fmtMB(piperSize(v))})</span></span>
       <span class="muted pstat"></span>
-      ${have ? `<button data-ptry="${esc(v.key)}">▶ Try</button><button class="danger" data-prm="${esc(v.key)}">Remove</button>` : `<button data-pdl="${esc(v.key)}">Download</button>`}</div>`;
+      ${have ? `<button data-ptry="${esc(v.key)}">▶ Try</button><button class="danger" data-prm="${esc(v.key)}">Remove</button>` : `<button data-psample="${esc(v.key)}" data-sid="p-${esc(v.key)}">▶ Sample</button><button data-pdl="${esc(v.key)}">Download</button>`}</div>`;
   }).join('');
   modal(`<h2>Voice options</h2>
     <h3>Kokoro natural voices (free, recommended)</h3>
     <p class="muted">Open-source neural voices that run on your PC and sound close to human, with US and UK accents. Download once, then they work offline for listening and MP3 export.</p>
     ${k ? `<div class="setrow"><span style="flex:1">✓ Installed (${k === 'fp32-webgpu' ? 'faster, uses your graphics card' : 'standard'})</span>
       <button id="kTry">▶ Try</button><button class="danger" id="kRemove">Remove</button></div>`
-    : `<label class="check"><input type="radio" name="kmode" value="q8-wasm" checked> Standard: about 90 MB download, works on any PC</label>
+    : `<div class="setrow" style="flex-wrap:wrap"><span class="muted">Hear them first:</span>${KOKORO_VOICES.filter(([id]) => KOKORO_BEST.has(id) || ['am_michael', 'bm_george', 'am_fenrir'].includes(id))
+         .map(([id, name]) => `<button data-ksample="${id}" data-sid="k-${id}" data-label="▶ ${esc(name)}">▶ ${esc(name)}</button>`).join('')}</div>
+       <label class="check"><input type="radio" name="kmode" value="q8-wasm" checked> Standard: about 90 MB download, works on any PC</label>
        ${gpu ? '<label class="check"><input type="radio" name="kmode" value="fp32-webgpu"> Faster with your graphics card: about 330 MB download</label>' : ''}
        <div class="setrow"><button class="primary" id="kInstall">Install Kokoro voices</button><span id="kStat" class="muted"></span></div>`}
     <h3>Piper voices (free, many voices &amp; languages)</h3>
@@ -245,7 +274,7 @@ async function openVoiceOptions() {
       <a href="${CLOUD_LINKS[p]}" target="_blank" class="muted" style="font-size:12px">get a key</a></div>`).join('')}
     <h3>Windows 11 natural voices</h3>
     <p class="muted">Windows' own natural voices (Aria, Jenny, Guy) only work in Narrator. A free third-party add-on, <a href="https://github.com/gexgd0419/NaturalVoiceSAPIAdapter" target="_blank">NaturalVoiceSAPIAdapter</a>, can make Microsoft's natural voices appear in other apps, including Shelf Reader's Windows voices and export. It's unofficial and may stop working after Windows updates.</p>`,
-  [['Done', () => fillVoiceSelect(), true]]);
+  [['Done', () => { SAMPLE.pause(); fillVoiceSelect(); }, true]]);
 
   // Kokoro
   const kInstall = $('#kInstall');
@@ -270,6 +299,9 @@ async function openVoiceOptions() {
       $('#kStat') && ($('#kStat').textContent = 'Install failed: ' + e.message + '. Check your internet connection and try again.');
     }
   };
+  document.querySelectorAll('[data-ksample]').forEach((b) => (b.onclick = () => {
+    playSample([SAMPLE_BASE + `pc-kokoro-${b.dataset.ksample}.mp3`], b);
+  }));
   if ($('#kTry')) $('#kTry').onclick = () => previewVoice('kokoro:af_heart');
   if ($('#kRemove')) $('#kRemove').onclick = async () => {
     try { await caches.delete('transformers-cache'); } catch (_) {}
@@ -292,6 +324,9 @@ async function openVoiceOptions() {
       } else if (b.dataset.prm) {
         await piperCall({ type: 'remove', voiceId: b.dataset.prm }).catch(() => {});
         await piperRefreshStored(); fillVoiceSelect(); openVoiceOptions();
+      } else if (b.dataset.psample) {
+        const v = (ENG.piper.catalog || []).find((x) => x.key === b.dataset.psample);
+        if (v) playSample(piperSampleUrls(v), b);
       } else if (b.dataset.ptry) {
         previewVoice('piper:' + b.dataset.ptry);
       }

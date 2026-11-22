@@ -46,13 +46,11 @@ object Updater {
         }
         val build = j.optString("tag_name").removePrefix("build-").toIntOrNull() ?: return null
         val assets = j.optJSONArray("assets") ?: return null
-        for (i in 0 until assets.length()) {
-            val a = assets.getJSONObject(i)
-            if (a.optString("name").endsWith(".apk")) {
-                return Release(build, a.getString("browser_download_url"), j.optString("body"), a.optString("url"))
-            }
-        }
-        return null
+        // 64-bit phones get ShelfReader.apk, 32-bit ones ShelfReader-32bit.apk (older releases had one APK for all)
+        val want = if (android.os.Build.SUPPORTED_64_BIT_ABIS.isEmpty()) "ShelfReader-32bit.apk" else "ShelfReader.apk"
+        val apks = (0 until assets.length()).map { assets.getJSONObject(it) }.filter { it.optString("name").endsWith(".apk") }
+        val a = apks.firstOrNull { it.optString("name") == want } ?: apks.firstOrNull { !it.optString("name").contains("32bit") } ?: apks.firstOrNull() ?: return null
+        return Release(build, a.getString("browser_download_url"), j.optString("body"), a.optString("url"))
     }
 
     private fun hasApk(j: JSONObject): Boolean {

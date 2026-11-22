@@ -3,7 +3,7 @@
 set -u
 model="${1:-kokoro-int8-en-v0_19}"
 mode="${2:-voice}"
-adb install -r app/build/outputs/apk/debug/app-debug.apk
+adb install -r "${APK:-app/build/outputs/apk/debug/app-debug.apk}"
 adb logcat -G 16M || true
 adb logcat -c
 if [ "$mode" = "read" ]; then

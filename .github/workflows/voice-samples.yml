@@ -1,6 +1,6 @@
 name: Voice samples
 
-# Makes a short sample of every natural phone voice and saves them to the "voice-samples" branch,
+# Makes a short sample of every natural voice (phone, and the PC app's Kokoro voices) and saves them to the "voice-samples" branch,
 # so the app can play a voice before you download it. Runs when the voice list or this file changes.
 on:
   workflow_dispatch:
@@ -9,6 +9,7 @@ on:
     paths:
       - 'app/src/main/java/com/shelfreader/NeuralVoices.kt'
       - 'tools/make_voice_samples.py'
+      - 'desktop/ui/engines.js'
       - '.github/workflows/voice-samples.yml'
 
 jobs:
@@ -23,6 +24,7 @@ jobs:
       - name: Tools
         run: |
           pip install 'sherpa-onnx>=1.12.26,<1.13'
+          pip install kokoro-onnx || echo "kokoro-onnx not installed: PC Kokoro samples will be skipped"
           command -v ffmpeg || (sudo apt-get update && sudo apt-get install -y ffmpeg)
       - name: Make samples
         run: python3 tools/make_voice_samples.py out

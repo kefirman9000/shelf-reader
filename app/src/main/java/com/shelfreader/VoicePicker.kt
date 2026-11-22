@@ -35,7 +35,7 @@ class VoicePicker(
 ) {
     private val app = a.applicationContext
     private val main = Handler(Looper.getMainLooper())
-    private val dlg = Dialog(a, android.R.style.Theme_Material_NoActionBar)
+    private val dlg = Dialog(a, R.style.AppTheme)
     private val body = LinearLayout(a).apply { orientation = LinearLayout.VERTICAL; setPadding(0, 0, 0, a.dp(32)) }
     private val progress = HashMap<String, Pair<ProgressBar, TextView>>()
     private var unlisten: (() -> Unit)? = null
@@ -65,7 +65,7 @@ class VoicePicker(
     // ---------- building the list ----------
 
     private fun sig() = NeuralVoices.MODELS.joinToString { m ->
-        m.id + (if (VoiceDownloads.state(m.id) != null) ":d" + (if (VoiceDownloads.state(m.id)!!.unpacking) "u" else "") else "") + (if (NeuralVoices.installed(app, m)) ":i" else "")
+        m.id + (if (VoiceDownloads.waiting(m.id)) ":w" else "") + (if (VoiceDownloads.state(m.id) != null) ":d" + (if (VoiceDownloads.state(m.id)!!.unpacking) "u" else "") else "") + (if (NeuralVoices.installed(app, m)) ":i" else "")
     }
 
     private fun onDownloadsChanged() {
@@ -86,6 +86,7 @@ class VoicePicker(
         body.removeAllViews(); progress.clear()
         val cur = Settings.voiceFor(app, bookId)
         body.addView(note("Tap ▶ to hear a voice, then Use to read this book with it. Natural voices sound the most human and work offline once downloaded."))
+        storageLine()
 
         val kokoro = NeuralVoices.MODELS.filter { it.kind == "kokoro" }
         val piper = NeuralVoices.MODELS.filter { it.kind == "piper" }
@@ -98,7 +99,16 @@ class VoicePicker(
 
         body.addView(a.sectionTitle("Clear and light · Piper"))
         body.addView(note("One voice per download (about 64 MB each). Smaller and faster than Kokoro, and in more languages."))
-        for (m in piper) neuralRow(m, m.voices[0].first, m.voices[0].second, cur)
+        // grouped by language: the phone's own language first, then English, then the rest A–Z
+        val mine = Locale.getDefault().language
+        val langs = piper.map { it.lang }.distinct().sortedWith(compareBy({ it != mine }, { it != "en" }, { Locale(it).displayLanguage }))
+        for (lang in langs) {
+            body.addView(TextView(a).apply {
+                text = Locale(lang).getDisplayLanguage(Locale.getDefault()).replaceFirstChar { it.uppercase() }
+                textSize = 13f; setTextColor(UiColors.MUTED); setTypeface(typeface, Typeface.BOLD); setPadding(a.dp(20), a.dp(10), a.dp(20), a.dp(2))
+            })
+            for (m in piper.filter { it.lang == lang }) neuralRow(m, m.voices[0].first, m.voices[0].second, cur)
+        }
 
         body.addView(a.sectionTitle("Phone voices · Google"))
         phoneRows(cur)
@@ -124,6 +134,7 @@ class VoicePicker(
             textSize = 14f; setTextColor(UiColors.FG); setLineSpacing(0f, 1.15f)
             text = when {
                 st != null -> "Getting ${m.voices.size} voices…"
+                VoiceDownloads.waiting(m.id) -> "Waiting for Wi-Fi · starts by itself when you're on Wi-Fi"
                 have -> "✓ Downloaded · ${m.voices.size} voices, work offline"
                 else -> "${m.voices.size} English voices in one download of about ${m.sizeMb} MB. Wi-Fi is a good idea."
             }
@@ -132,7 +143,8 @@ class VoicePicker(
         when {
             st != null -> {}
             have -> line.addView(a.pill("Remove") { confirmRemove(m) })
-            else -> line.addView(a.pill("Download", true) { VoiceDownloads.start(app, m) })
+            VoiceDownloads.waiting(m.id) -> line.addView(a.pill("Download now", true) { VoiceDownloads.cancelWaiting(m.id); VoiceDownloads.start(app, m) })
+            else -> line.addView(a.pill("Download", true) { get(m) })
         }
         card.addView(line)
         if (st != null) card.addView(progressBlock(m.id, st))
@@ -162,6 +174,7 @@ class VoicePicker(
         val sub = when {
             m.kind == "piper" && st != null -> null
             inUse -> "In use for this book"
+            VoiceDownloads.waiting(m.id) -> "Waiting for Wi-Fi"
             have -> desc
             m.kind == "kokoro" -> "$desc · sample"
             else -> "$desc · ${m.sizeMb} MB · sample"
@@ -170,8 +183,9 @@ class VoicePicker(
             inUse -> "In use" to null
             have -> "Use" to { use(key) }
             st != null -> "…" to null
-            m.kind == "kokoro" -> "Get & use" to { VoiceDownloads.start(app, m) { useLater(key) } }
-            else -> "Download" to { VoiceDownloads.start(app, m) { useLater(key) } }
+            VoiceDownloads.waiting(m.id) -> "Now" to { VoiceDownloads.cancelWaiting(m.id); VoiceDownloads.start(app, m) { useLater(key) } }
+            m.kind == "kokoro" -> "Get & use" to { get(m) { useLater(key) } }
+            else -> "Download" to { get(m) { useLater(key) } }
         }
         val row = row(name, sub, inUse, key, { sample(key, m, sid, have) }, action,
             extra = if (have && m.kind == "piper") a.iconBtn("🗑", "Remove ${m.title}") { confirmRemove(m) } else null)
@@ -311,6 +325,40 @@ class VoicePicker(
         TtsService.instance?.applySettings(true)
         app.toast("Using $label for this book.")
         render()
+    }
+
+    /** Downloads [m], first asking whether to wait for Wi-Fi when the phone is on mobile data. */
+    private fun get(m: NeuralVoices.Model, then: (() -> Unit)? = null) {
+        if (!VoiceDownloads.onMobileData(app)) { VoiceDownloads.start(app, m, then); return }
+        AlertDialog.Builder(a).setTitle("You're on mobile data")
+            .setMessage("${m.title} is about ${m.sizeMb} MB. Download it now, or wait until you're on Wi-Fi? It starts by itself then, even with this screen closed.")
+            .setPositiveButton("Wait for Wi-Fi") { _, _ -> VoiceDownloads.startOnWifi(app, m, then); if (alive()) render() }
+            .setNeutralButton("Download now") { _, _ -> VoiceDownloads.start(app, m, then) }
+            .setNegativeButton("Cancel", null).show()
+    }
+
+    /** "Downloaded voices: 164 MB · Remove all" */
+    private fun storageLine() {
+        val have = NeuralVoices.MODELS.filter { NeuralVoices.installed(app, it) }
+        if (have.isEmpty()) return
+        val mb = have.sumOf { m -> NeuralVoices.dir(app, m).walkTopDown().filter { it.isFile }.sumOf { it.length() } } / 1_000_000
+        val line = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(a.dp(20), a.dp(8), a.dp(16), a.dp(2)) }
+        line.addView(TextView(a).apply {
+            text = "Downloaded: ${have.size} voice pack${if (have.size == 1) "" else "s"}, $mb MB"; textSize = 14f; setTextColor(UiColors.FG)
+        }, LinearLayout.LayoutParams(0, WRAP, 1f))
+        line.addView(a.pill("Remove all") {
+            AlertDialog.Builder(a).setTitle("Remove all downloaded voices?")
+                .setMessage("Frees $mb MB. You can download them again any time. Books using them go back to the phone's voice.")
+                .setPositiveButton("Remove all") { _, _ ->
+                    stopSample()
+                    Thread {
+                        for (m in have) try { NeuralVoices.remove(app, m) } catch (_: Throwable) {}
+                        main.post { if (alive()) render() }
+                    }.start()
+                }
+                .setNegativeButton("Keep", null).show()
+        })
+        body.addView(line)
     }
 
     private fun confirmRemove(m: NeuralVoices.Model) {

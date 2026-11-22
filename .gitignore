@@ -7,3 +7,7 @@ local.properties
 # fetched by CI (sherpa-onnx runtime for natural voices)
 app/src/main/jniLibs/
 app/src/main/java/com/k2fsa/
+
+# Python caches
+__pycache__/
+*.pyc

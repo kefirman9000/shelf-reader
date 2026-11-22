@@ -20,6 +20,43 @@ object VoiceDownloads {
     private val main = Handler(Looper.getMainLooper())
 
     fun state(id: String): State? = running[id]
+
+    // ---------- waiting for Wi-Fi ----------
+    private val waitingFor = ConcurrentHashMap<String, Pair<NeuralVoices.Model, (() -> Unit)?>>()
+    private var wifiCallback: android.net.ConnectivityManager.NetworkCallback? = null
+
+    fun waiting(id: String) = waitingFor.containsKey(id)
+    fun cancelWaiting(id: String) { waitingFor.remove(id); changed() }
+
+    /** True when the phone's internet is metered (mobile data or a metered hotspot). */
+    fun onMobileData(ctx: Context): Boolean = try {
+        (ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager).isActiveNetworkMetered
+    } catch (_: Throwable) { false }
+
+    /** Downloads [m] as soon as the phone is on Wi-Fi (or another unmetered network). */
+    fun startOnWifi(ctx: Context, m: NeuralVoices.Model, then: (() -> Unit)? = null) {
+        val app = ctx.applicationContext
+        waitingFor[m.id] = m to then
+        changed()
+        synchronized(this) {
+            if (wifiCallback != null) return
+            val cm = app.getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+            val cb = object : android.net.ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(network: android.net.Network) {
+                    main.post {
+                        val all = waitingFor.values.toList(); waitingFor.clear()
+                        for ((mm, t) in all) start(app, mm, t)
+                        synchronized(this@VoiceDownloads) { try { cm.unregisterNetworkCallback(this) } catch (_: Throwable) {}; wifiCallback = null }
+                        changed()
+                    }
+                }
+            }
+            val req = android.net.NetworkRequest.Builder()
+                .addCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                .addCapability(android.net.NetworkCapabilities.NET_CAPABILITY_NOT_METERED).build()
+            try { cm.registerNetworkCallback(req, cb); wifiCallback = cb } catch (t: Throwable) { app.toast("Couldn't wait for Wi-Fi: ${t.message}") }
+        }
+    }
     /** The last failure for a voice, shown once. */
     fun takeError(id: String): String? = failed.remove(id)
 

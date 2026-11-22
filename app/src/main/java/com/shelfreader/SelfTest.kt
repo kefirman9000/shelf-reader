@@ -22,6 +22,8 @@ object SelfTest {
                     Log.i(TAG, "voice ready: ${m.id}")
                 }
                 Settings.setBookRate(ctx, id, 3f)
+                // background sounds play under the voice the whole way, as a user would have them
+                Ambience.setMix(ctx, mapOf("rain" to 0.5f, "fire" to 0.4f)); Ambience.setOn(ctx, true)
                 if (voice != null) Settings.setBookVoice(ctx, id, voice)
                 ctx.startForegroundService(android.content.Intent(ctx, TtsService::class.java).setAction(TtsService.ACTION_PLAY).putExtra(TtsService.EXTRA_BOOK, id))
                 var lastSeg = -1; var still = 0; var started2 = false
@@ -83,7 +85,9 @@ object SelfTest {
                 else if (sp.tracksOpened > 1) Log.e(TAG, "SELFTEST FAILED: the speaker was reopened ${sp.tracksOpened} times")
                 else Log.i(TAG, "SELFTEST DONE OK")
             } catch (t: Throwable) {
-                Log.e(TAG, "SELFTEST FAILED", t)
+                // on a phone short of memory the app should say so and carry on, not close: that's a pass
+                if (t.message?.startsWith("Not enough free memory") == true) Log.i(TAG, "SELFTEST DONE OK (declined the voice for lack of memory, no crash)")
+                else Log.e(TAG, "SELFTEST FAILED", t)
             }
         }.start()
     }

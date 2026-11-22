@@ -17,7 +17,7 @@ import android.widget.TextView
  */
 class AmbiencePicker(private val a: Activity, private val onClose: () -> Unit = {}) {
     private val app = a.applicationContext
-    private val dlg = Dialog(a, android.R.style.Theme_Material_NoActionBar)
+    private val dlg = Dialog(a, R.style.AppTheme)
     private val body = LinearLayout(a).apply { orientation = LinearLayout.VERTICAL; setPadding(0, 0, 0, a.dp(32)) }
 
     fun show() {

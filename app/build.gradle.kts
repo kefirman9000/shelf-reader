@@ -8,12 +8,12 @@ val buildNumber = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInt()
 android {
     testOptions { unitTests.isReturnDefaultValues = true }
     namespace = "com.shelfreader"
-    compileSdk = 34
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "com.shelfreader"
         minSdk = 26
-        targetSdk = 34
+        targetSdk = 35
         versionCode = buildNumber
         versionName = "1.0.$buildNumber"
     }
@@ -39,8 +39,21 @@ android {
             if (ksFile.exists()) signingConfig = signingConfigs.getByName("shared")
         }
         getByName("release") {
-            isMinifyEnabled = false
+            // smaller app: drops unused library code (the app's own code and the voice engine are kept whole)
+            isMinifyEnabled = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = if (ksFile.exists()) signingConfigs.getByName("shared") else signingConfigs.getByName("debug")
+        }
+    }
+
+    // Releases come as one APK per phone type: 64-bit (nearly every phone) and 32-bit (older ones), so each
+    // carries only its own voice engine. Only when asked (-PabiSplits), so test builds stay a single APK.
+    splits {
+        abi {
+            isEnable = project.hasProperty("abiSplits")
+            reset()
+            include("arm64-v8a", "armeabi-v7a")
+            isUniversalApk = false
         }
     }
 

@@ -44,7 +44,18 @@ object NeuralVoices {
         Model("vits-piper-es_ES-davefx-medium", "Piper Davefx", "piper", 64, "es", "es_ES-davefx-medium.onnx", listOf(0 to "Davefx · Spanish man")),
         Model("vits-piper-fr_FR-siwis-medium", "Piper Siwis", "piper", 64, "fr", "fr_FR-siwis-medium.onnx", listOf(0 to "Siwis · French woman")),
         Model("vits-piper-it_IT-paola-medium", "Piper Paola", "piper", 64, "it", "it_IT-paola-medium.onnx", listOf(0 to "Paola · Italian woman")),
-        Model("vits-piper-pt_BR-faber-medium", "Piper Faber", "piper", 64, "pt", "pt_BR-faber-medium.onnx", listOf(0 to "Faber · Brazilian man"))
+        Model("vits-piper-pt_BR-faber-medium", "Piper Faber", "piper", 64, "pt", "pt_BR-faber-medium.onnx", listOf(0 to "Faber · Brazilian man")),
+        Model("vits-piper-nl_BE-nathalie-medium", "Piper Nathalie", "piper", 64, "nl", "nl_BE-nathalie-medium.onnx", listOf(0 to "Nathalie · Dutch (Belgian) woman")),
+        Model("vits-piper-pl_PL-gosia-medium", "Piper Gosia", "piper", 64, "pl", "pl_PL-gosia-medium.onnx", listOf(0 to "Gosia · Polish woman")),
+        Model("vits-piper-pl_PL-darkman-medium", "Piper Darkman", "piper", 64, "pl", "pl_PL-darkman-medium.onnx", listOf(0 to "Darkman · Polish man")),
+        Model("vits-piper-ru_RU-irina-medium", "Piper Irina", "piper", 64, "ru", "ru_RU-irina-medium.onnx", listOf(0 to "Irina · Russian woman")),
+        Model("vits-piper-ru_RU-dmitri-medium", "Piper Dmitri", "piper", 64, "ru", "ru_RU-dmitri-medium.onnx", listOf(0 to "Dmitri · Russian man")),
+        Model("vits-piper-cs_CZ-jirka-medium", "Piper Jirka", "piper", 64, "cs", "cs_CZ-jirka-medium.onnx", listOf(0 to "Jirka · Czech man")),
+        Model("vits-piper-sv_SE-nst-medium", "Piper NST", "piper", 64, "sv", "sv_SE-nst-medium.onnx", listOf(0 to "NST · Swedish voice")),
+        Model("vits-piper-da_DK-talesyntese-medium", "Piper Talesyntese", "piper", 64, "da", "da_DK-talesyntese-medium.onnx", listOf(0 to "Talesyntese · Danish voice")),
+        Model("vits-piper-no_NO-talesyntese-medium", "Piper Talesyntese (Norwegian)", "piper", 64, "no", "no_NO-talesyntese-medium.onnx", listOf(0 to "Talesyntese · Norwegian voice")),
+        Model("vits-piper-tr_TR-dfki-medium", "Piper DFKI", "piper", 64, "tr", "tr_TR-dfki-medium.onnx", listOf(0 to "DFKI · Turkish voice")),
+        Model("vits-piper-zh_CN-huayan-medium", "Piper Huayan", "piper", 64, "zh", "zh_CN-huayan-medium.onnx", listOf(0 to "Huayan · Chinese woman"))
     )
 
     /** The earlier, full-size Kokoro download (320 MB). Voices chosen with it now use the compact one. */
