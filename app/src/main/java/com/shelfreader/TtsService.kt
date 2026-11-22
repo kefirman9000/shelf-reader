@@ -326,6 +326,7 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
             if (status != TextToSpeech.SUCCESS) {
                 toast("No text-to-speech engine available. Install “Speech Services by Google” from the Play Store.")
                 playing = false
+                Ambience.reading(this, false)
                 update()
                 return@post
             }
@@ -470,11 +471,13 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
         if (!requestFocus()) { playing = false; update(); return }
         acquireWake()
         if (ready) speakFrom(segIndex)
+        Ambience.reading(this, true)
         update()
     }
 
     fun pause() {
         playing = false
+        Ambience.reading(this, false)
         gen++
         tts?.stop()
         neural?.stop()
@@ -696,6 +699,7 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
             done = true
         }
         playing = false
+        Ambience.reading(this, false)
         releaseWake()
         update()
         // Up next: start the next book in the queue, or (with "Keep listening" on) another book from the library
@@ -938,6 +942,7 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
 
     override fun onDestroy() {
         instance = null
+        Ambience.reading(this, false)
         gen++
         main.removeCallbacks(sleepTick)
         main.removeCallbacks(watchdog)

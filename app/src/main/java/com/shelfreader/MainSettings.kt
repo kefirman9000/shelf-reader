@@ -49,6 +49,7 @@ internal fun MainActivity.buildSettings() {
     add(sectionTitle("Voice & audio"))
     add(settingRow("🗣", "Voice and speed", "Default voice for new books, and how fast it reads. Each book can also have its own (in the player).") { defaultVoiceDialog() })
     add(settingRow("✨", "Get better voices", "Install natural Google voices, step by step") { showVoiceGuide(this) })
+    add(settingRow("🌧", "Background sounds", "Rain, waves, fire, white noise… under the voice, each with its own volume · ${Ambience.summary(this)}") { AmbiencePicker(this).show() })
     add(settingRow("🔤", "Pronunciations", "Fix names or words the voice says wrong") { editPronunciations { svc() } })
     add(settingRow("⏸", "Natural pauses", "Pause by punctuation, longer between paragraphs, chapter headings announced", Settings.naturalPauses(this)) { Settings.setNaturalPauses(this, it?.isChecked == true); svc() })
     add(settingRow("🔢", "Say numbers properly", "“Chapter XII” → “Chapter Twelve”, Henry VIII, 1850s, $4.50, Dr., St.", Settings.speakNumbers(this)) { Settings.setSpeakNumbers(this, it?.isChecked == true); svc() })

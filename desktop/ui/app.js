@@ -527,8 +527,8 @@ function promptNote(i) {
 async function removeNotes(i) { await saveState({ notes: (S.bookState.notes || []).filter((n) => n.para !== i) }); refreshMarks(); }
 
 // ---------- drawer: chapters / bookmarks / search ----------
-function openDrawer(title, html) { $('#drawerTitle').textContent = title; $('#drawerBody').innerHTML = html; $('#drawer').hidden = false; }
-function closeDrawer() { $('#drawer').hidden = true; }
+function openDrawer(title, html) { if (typeof Ambience !== 'undefined') Ambience.closed(); $('#drawerTitle').textContent = title; $('#drawerBody').innerHTML = html; $('#drawer').hidden = false; }
+function closeDrawer() { $('#drawer').hidden = true; if (typeof Ambience !== 'undefined') Ambience.closed(); }
 $('#drawerClose').onclick = closeDrawer;
 function showChapters() {
   if (!S.book) return;
@@ -717,6 +717,7 @@ function play() {
   if (!S.book || !S.segs.length) return;
   S.playing = true;
   keepAlive(true);
+  Ambience.reading(true);
   $('#pages').classList.add('listening');
   speakFrom(S.segIdx);
   updatePlayer();
@@ -725,6 +726,7 @@ function play() {
 function pause() {
   if (!S.playing) { updatePlayer(); return; }
   S.playing = false; S.token++;
+  Ambience.reading(false);
   speechSynthesis.cancel();
   stopAudio();
   keepAlive(false);
@@ -1184,6 +1186,7 @@ $('#pPlay').onclick = toggle;
 $('#pPrev').onclick = () => skipTime(-15);
 $('#pPrev').ondblclick = (e) => { e.preventDefault(); repeatSentence(); };
 $('#pNext').onclick = () => skipTime(30);
+$('#ambBtn').onclick = () => Ambience.open();
 $('#histBtn').onclick = (e) => { const r = e.target.getBoundingClientRect(); showHistory(r.left, r.top - 8 - 34 * Math.min(12, (S.history || []).length || 1)); };
 $('#pChapPrev').onclick = () => stepChapter(-1);
 $('#pChapNext').onclick = () => stepChapter(1);
@@ -1288,7 +1291,7 @@ function openSettings() {
     <div class="setrow"><label>Night mode</label>from <input type="time" id="sNightFrom" value="${esc((s.night && s.night.from) || '21:00')}"> to <input type="time" id="sNightTo" value="${esc((s.night && s.night.to) || '07:00')}">
       <select id="sNightTheme">${opt(['Dark', 'Light', 'Sepia', 'Black'], (s.night && s.night.theme) ?? 3)}</select></div>
     <h3>Reading aloud</h3>
-    <div class="setrow"><button id="sVoices" class="primary">Voice options: natural &amp; premium voices…</button> <button id="sReport">🐞 Report a problem</button></div>
+    <div class="setrow"><button id="sVoices" class="primary">Voice options: natural &amp; premium voices…</button> <button id="sAmbience">🌧 Background sounds… (${esc(Ambience.summary())})</button> <button id="sReport">🐞 Report a problem</button></div>
     <label class="check"><input type="checkbox" id="sClutter" ${s.skipClutter !== false ? 'checked' : ''}> Skip page numbers, running headers, footnote markers, links and scan notices</label>
     <label class="check"><input type="checkbox" id="sAutoNext" ${s.autoNextBook ? 'checked' : ''}> Keep listening: when a book ends, start another (Up next first, then Want to read, then books you've started)</label>
     <label class="check"><input type="checkbox" id="sFixLines" ${s.fixBrokenLines !== false ? 'checked' : ''}> Fix broken lines: join sentences a book split across lines (scanned books and PDFs) before reading them aloud</label>
@@ -1332,6 +1335,7 @@ function openSettings() {
   }));
   $('#sRestore').onclick = () => $('#restoreInput').click();
   $('#sVoices').onclick = () => openVoiceOptions();
+  $('#sAmbience').onclick = () => { $('#modal').hidden = true; Ambience.open(); };
   $('#sReport').onclick = () => reportProblem();
   $('#sUpdate').onclick = checkUpdates;
   renderUpdateBox();

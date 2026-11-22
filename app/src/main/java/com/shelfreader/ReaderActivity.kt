@@ -306,6 +306,7 @@ class ReaderActivity : Activity(), BookPageView.Host {
         chips.addView(speedBtn, cg())
         chips.addView(chip("🗣 Voice") { pickVoice() }, cg())
         chips.addView(chip("🌙 Sleep") { sleepMenu() }, cg())
+        chips.addView(chip("🌧 Sounds") { AmbiencePicker(this).show() }, cg())
         chips.addView(layoutChip, cg())
         chips.addView(chip("🔖 Notes") { showNotes() }, cg())
         chips.addView(chip("🔎 Find") { searchInBook() }, cg())
@@ -790,6 +791,7 @@ class ReaderActivity : Activity(), BookPageView.Host {
                 toast(if (Settings.autoNextBook(this)) "When a book ends, the next one starts by itself" else "Stops at the end of a book (unless something is in Up next)")
             },
             SheetRow("🌙", "Sleep timer", "Stop after a time or at the end of the chapter") { action(3) },
+            SheetRow("🌧", "Background sounds", Ambience.summary(this).let { if (it == "Off") "Rain, waves, fire, white noise… under the voice" else it }) { AmbiencePicker(this).show() },
             SheetRow("⏸", "Natural pauses & chapter announcements", null, Settings.naturalPauses(this)) { action(19) },
             SheetRow("🔢", "Say numbers properly", "Chapter XII → Twelve, 1850s, \$4.50", Settings.speakNumbers(this)) { action(20) },
             SheetRow("✂", "Skip page numbers & clutter", null, Settings.skipClutter(this)) { action(7) },

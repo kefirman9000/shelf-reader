@@ -155,7 +155,7 @@ object CrashReport {
         sb.append("What happened: ").append(what.ifBlank { "(not described)" }).append("\n\n")
         if (s != null) sb.append(s.diagnostics()).append("\n")
         sb.append("Settings: natural pauses ${Settings.naturalPauses(ctx)}, say numbers ${Settings.speakNumbers(ctx)}, " +
-            "fix broken lines ${Settings.fixBrokenLines(ctx)}, skip clutter ${Settings.skipClutter(ctx)}, gentle voices ${safeVoices(ctx)}\n\n")
+            "fix broken lines ${Settings.fixBrokenLines(ctx)}, skip clutter ${Settings.skipClutter(ctx)}, gentle voices ${safeVoices(ctx)}, background sounds ${Ambience.summary(ctx)}\n\n")
         sb.append("Recent events:\n").append(eventLog(ctx).ifBlank { "(none)" })
         return sb.toString()
     }

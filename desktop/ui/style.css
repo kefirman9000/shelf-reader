@@ -313,3 +313,18 @@ body.theme-1 input[type=time], body.theme-2 input[type=time] { color-scheme: lig
   .popts select { max-width: 150px; }
 }
 @media (max-width: 600px) { .popts #voiceSel { max-width: 120px; } #pLeft { display: none; } }
+
+/* background sounds panel */
+.amb-vol { display: flex; align-items: center; gap: 10px; margin: 6px 0 4px; }
+.amb-vol input { flex: 1; }
+.amb-h { margin: 16px 0 6px; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+.amb-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.amb-chips .chipb { height: 32px; padding: 0 12px; border-radius: 16px; font-weight: 500; }
+.amb-card { background: var(--panel2); border: 1px solid var(--line); border-radius: 12px; padding: 8px 10px; margin: 6px 0; }
+.amb-head { display: flex; align-items: center; gap: 8px; }
+.amb-head b { flex: 1; font-weight: 600; }
+.amb-card input[type=range] { width: 100%; }
+.amb-add { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; background: transparent; border: 0; border-radius: 10px; padding: 9px 8px; cursor: pointer; color: inherit; font: inherit; }
+.amb-add:hover { background: var(--panel2); }
+.amb-add span:first-child { width: 24px; text-align: center; font-size: 18px; }
+.amb-plus { margin-left: auto; color: var(--accent); font-weight: 600; }

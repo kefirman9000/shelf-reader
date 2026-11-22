@@ -45,6 +45,9 @@ jobs:
       - name: Phone and PC read text the same way
         run: node desktop/test/parity.test.js
 
+      - name: Background sounds (PC)
+        run: node desktop/test/ambience.test.js
+
       # the signing key comes from the repository's secrets when they're set (see README → Signing key)
       - name: Signing key
         env:
