@@ -119,8 +119,9 @@ function updatePlayer() {
   parts.push(pct + '%');
   if (S.sleepChapter) parts.push('sleep at chapter end');
   else if (S.sleepAt) parts.push(`sleep in ${Math.max(1, Math.ceil((S.sleepAt - Date.now()) / 60000))} min`);
-  $('#pStatus').textContent = parts.join(' · ');
-  $('#pPlay').textContent = S.playing ? '❚❚' : '▶';
+  const pn = S.pendingNext && bookById(S.pendingNext.id);
+  $('#pStatus').textContent = pn ? `Finished 🎉 · next: “${pn.title}” in a moment · ■ to stop it` : parts.join(' · ');
+  $('#pPlay').textContent = pn ? '■' : S.playing ? '❚❚' : '▶';
   if (!S.seeking) $('#seek').value = S.paras.length ? Math.round(p * 100 / Math.max(1, S.paras.length - 1)) : 0;
   if ('mediaSession' in navigator) navigator.mediaSession.playbackState = S.playing ? 'playing' : 'paused';
 }
@@ -133,6 +134,7 @@ function savePos(force) {
 }
 
 function play() {
+  if (S.pendingNext) { startPendingNext(); return; }
   if (!S.book || !S.segs.length) return;
   S.playing = true;
   keepAlive(true);
@@ -143,6 +145,7 @@ function play() {
   if (S.view === 'library') renderLibrary();
 }
 function pause() {
+  if (cancelPendingNext()) return;
   if (!S.playing) { updatePlayer(); return; }
   S.playing = false; S.token++;
   Ambience.reading(false);
@@ -154,7 +157,7 @@ function pause() {
   updatePlayer();
   if (S.view === 'library') renderLibrary();
 }
-function toggle() { S.playing ? pause() : play(); }
+function toggle() { if (cancelPendingNext()) return; S.playing ? pause() : play(); }
 function speakFrom(i) {
   const token = ++S.token;
   speechSynthesis.cancel();
@@ -365,31 +368,67 @@ function afterMove() {
 }
 async function finished() {
   S.playing = false; S.token++; keepAlive(false); stopAudio();
+  Ambience.reading(false);
+  $('#pages').classList.remove('listening');
   S.segIdx = Math.max(0, S.segs.length - 1);
   savePos(true); updatePlayer();
-  const cols = new Set(S.bookState.collections || []); cols.add('Finished'); cols.delete('Want to read');
-  await saveState({ collections: [...cols] });
-  api('/api/stats/finished', { method: 'POST', json: { id: S.book.id, title: S.book.title, author: S.book.author } }).catch(() => {});
-  toast(`Finished “${S.book.title}” 🎉`);
+  const done = S.book;
+  try {
+    const cols = new Set(S.bookState.collections || []); cols.add('Finished'); cols.delete('Want to read');
+    await saveState({ collections: [...cols] });
+  } catch (e) { note('could not mark the book finished: ' + e.message); }
+  api('/api/stats/finished', { method: 'POST', json: { id: done.id, title: done.title, author: done.author } }).catch(() => {});
   // Up next first; with "Keep listening" on, another book from the library
-  const q = (S.settings.queue || []).filter((id) => id !== S.book.id && bookById(id));
-  const next = q.length ? bookById(q[0]) : S.settings.autoNextBook ? nextBookAfter(S.book.id) : null;
-  if (next) {
-    if (q.length) await saveSettings({ queue: q.slice(1) });
-    let cancelled = false;
-    toastAction(`Finished “${S.book.title}”. Next: “${next.title}”…`, 'Cancel', () => { cancelled = true; }, 6000);
-    setTimeout(async () => { if (cancelled || S.playing) return; await loadBook(next.id); if (S.view === 'reader') renderReader(); play(); }, 6000);
+  const q = (S.settings.queue || []).filter((id) => id !== done.id && bookById(id));
+  const next = q.length ? bookById(q[0]) : S.settings.autoNextBook ? nextBookAfter(done.id) : null;
+  if (!next) {
+    toast(S.settings.autoNextBook ? `Finished “${done.title}” 🎉 That was the last unread book in your library.` : `Finished “${done.title}” 🎉`);
+    return;
   }
+  if (q.length) saveSettings({ queue: q.slice(1) }).catch(() => {});
+  // the pause between books: Play starts the next one now, Pause or Cancel stops it
+  keepAlive(true);
+  S.pendingNext = { id: next.id, from: done.id, timer: setTimeout(startPendingNext, 6000) };
+  toastAction(`Finished “${done.title}” 🎉 Next: “${next.title}”…`, 'Cancel', cancelPendingNext, 6000);
+  updatePlayer();
+}
+async function startPendingNext() {
+  const p = S.pendingNext; if (!p) return;
+  clearTimeout(p.timer); S.pendingNext = null;
+  const tried = new Set();
+  let b = bookById(p.id);
+  while (b && !tried.has(b.id)) {
+    tried.add(b.id);
+    try {
+      await loadBook(b.id);
+      if (S.view === 'reader') renderReader();
+      play();
+      return;
+    } catch (e) {
+      note('next book could not be opened: ' + b.title + ': ' + e.message);
+      b = S.settings.autoNextBook ? nextBookAfter(p.from, tried) : null;
+    }
+  }
+  keepAlive(false); updatePlayer();
+  toast("Couldn't open the next book.");
+}
+function cancelPendingNext() {
+  const p = S.pendingNext; if (!p) return false;
+  clearTimeout(p.timer); S.pendingNext = null;
+  keepAlive(false); updatePlayer();
+  toast("Stopped. The next book won't start.");
+  return true;
 }
 
 /** The book to play when one ends and Up next is empty: Want to read first, then a book you've started,
- *  then the newest one you haven't. Finished books are skipped. */
-function nextBookAfter(id) {
-  const all = (S.books || []).filter((b) => b.id !== id && !(b.collections || []).includes('Finished'));
+ *  then the newest one you haven't, then any other unfinished one. Finished books are skipped. */
+function nextBookAfter(id, skip) {
+  const all = (S.books || []).filter((b) => b.id !== id && !(skip && skip.has(b.id)) && !(b.collections || []).includes('Finished'));
   const newest = (list, key) => list.sort((a, b) => key(b) - key(a))[0] || null;
   return newest(all.filter((b) => (b.collections || []).includes('Want to read')), (b) => b.added || 0)
     || newest(all.filter((b) => b.percent > 0 && b.percent < 98), (b) => b.opened || 0)
-    || newest(all.filter((b) => !b.percent), (b) => b.added || 0);
+    || newest(all.filter((b) => !b.percent), (b) => b.added || 0)
+    || newest(all.slice(), (b) => b.opened || 0);
 }
 
 // ---------- Up next ----------

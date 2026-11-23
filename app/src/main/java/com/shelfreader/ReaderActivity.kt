@@ -442,6 +442,7 @@ class ReaderActivity : Activity(), BookPageView.Host {
     }
 
     internal fun refresh(force: Boolean = false) {
+        if (followNextBook()) return
         if (!loaded) return
         val s = service()
         val seg = s?.currentSeg()
@@ -468,8 +469,22 @@ class ReaderActivity : Activity(), BookPageView.Host {
         refreshButtons()
     }
 
+    /** When this book ended and the next one started by itself, show that one. */
+    private fun followNextBook(): Boolean {
+        val s = TtsService.instance ?: return false
+        val now = s.bookId ?: return false
+        if (!::book.isInitialized || now == book.id || s.continuedFrom != book.id || isFinishing) return false
+        finish()
+        startActivity(Intent(this, ReaderActivity::class.java).putExtra("book", now))
+        return true
+    }
+
     internal fun updateStatus() {
         val s = service()
+        s?.pendingNext?.let { n ->
+            status.text = "Finished 🎉 · next: ${Library.get(this, n)?.title ?: "the next book"} in a moment · ■ to stop it"
+            return
+        }
         val shown = if (bookMode && !isPlaying()) bookView.topPara() else curPara
         val pct = if (paras.isNotEmpty()) (shown + 1) * 100 / paras.size else 0
         val ch = chapterIndex(shown).let { if (it >= 0) prettyChapter(chapters[it].title) else book.author.ifBlank { "Unknown author" } }
@@ -509,7 +524,7 @@ class ReaderActivity : Activity(), BookPageView.Host {
     }
 
     internal fun refreshButtons() {
-        playBtn.text = if (isPlaying()) "❚❚" else "▶"
+        playBtn.text = if (service()?.pendingNext != null) "■" else if (isPlaying()) "❚❚" else "▶"
         if (::layoutChip.isInitialized) layoutChip.text = if (bookMode) "📖 Pages" else "📜 Scroll"
         speedBtn.text = fmtRate(Settings.rateFor(this, book.id))
     }

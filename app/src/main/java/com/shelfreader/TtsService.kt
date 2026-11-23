@@ -361,7 +361,7 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
         when (action) {
             ACTION_PLAY -> play()
             ACTION_SEEK -> if (playing && ready) speakFrom(segIndex) else update()
-            ACTION_TOGGLE -> if (playing) pause() else play()
+            ACTION_TOGGLE -> if (pendingNext != null) cancelPendingNext() else if (playing) pause() else play()
             ACTION_PAUSE -> pause()
             ACTION_NEXT -> skip(1)
             ACTION_PREV -> skip(-1)
@@ -377,6 +377,9 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
     private fun load(id: String): Boolean {
         val b = Library.get(this, id) ?: return false
         val d = try { Library.doc(this, b) } catch (t: Throwable) { return false }
+        // opening a book yourself cancels a next book that was about to start
+        if (pendingNext != null) { main.removeCallbacks(startNext); pendingNext = null }
+        continuedFrom = null
         gen++
         tts?.stop()
         neural?.stop()
@@ -464,6 +467,8 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
     // ---------- playback ----------
 
     fun play() {
+        // Play during the pause between books: start the next one now
+        if (pendingNext != null) { startPendingNext(); return }
         if (segs.isEmpty() && !loadLast()) return
         if (segs.isEmpty()) return
         ensureForeground()
@@ -476,6 +481,7 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
     }
 
     fun pause() {
+        if (cancelPendingNext()) return
         playing = false
         Ambience.reading(this, false)
         gen++
@@ -539,6 +545,7 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
     fun bookTitle(): String = title
 
     fun stopAll() {
+        cancelPendingNext()
         if (playing) pause()
         setSleep(0)
         abandonFocus()
@@ -689,10 +696,21 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
         return SpeechText.vary(((g / rate) - 150).toInt())
     }
 
+    // ---------- the next book, when one ends ----------
+    /** The book that starts in a moment (shown in the notification); pausing or stopping cancels it. */
+    var pendingNext: String? = null
+        private set
+    /** The book that just ended, when the service moved on to the next one by itself (the reader follows). */
+    var continuedFrom: String? = null
+        private set
+    private val startNext = Runnable { startPendingNext() }
+
     private fun finished() {
         val id = bookId
         var done = false
-        if (id != null && segs.isNotEmpty() && segIndex >= segs.size - 3) {
+        // the end of the book: the last few sentences, or everything after the last spoken one is skipped
+        // (page numbers, a list of illustrations, an index…); before, that left books unfinished and stopped there
+        if (id != null && segs.isNotEmpty() && (segIndex >= segs.size - 3 || (queuedUpTo >= segs.size - 1 && segIndex >= lastSpoken))) {
             Collections.add(this, id, Collections.FINISHED)
             Collections.set(this, id, Collections.of(this, id) - Collections.WANT)
             Library.get(this, id)?.let { Stats.finished(this, it) }
@@ -700,26 +718,66 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
         }
         playing = false
         Ambience.reading(this, false)
-        releaseWake()
-        update()
         // Up next: start the next book in the queue, or (with "Keep listening" on) another book from the library
         val q = Settings.queue(this).filter { it != id && Library.get(this, it) != null }
         val next = if (!done || id == null) null else q.firstOrNull() ?: if (Settings.autoNextBook(this)) nextBookAfter(id) else null
-        if (next != null) {
-            if (q.firstOrNull() == next) Settings.setQueue(this, q.drop(1))
-            val name = Library.get(this, next)?.title ?: ""
-            toast("Finished. Next: $name (pause to stop it)")
-            main.postDelayed({ if (!playing && load(next)) play() }, 5000)
+        if (next == null) {
+            releaseWake()
+            update()
+            if (done && id != null && Settings.autoNextBook(this) && q.isEmpty()) toast("Finished. That was the last unread book in your library.")
+            return
         }
+        if (q.firstOrNull() == next) Settings.setQueue(this, q.drop(1))
+        pendingNext = next
+        continuedFrom = id
+        // stay awake and in the notification for the pause between books: with the screen off, the phone would
+        // otherwise go to sleep and the next book wouldn't start until it was woken up
+        acquireWake()
+        update()
+        toast("Finished. Next: ${Library.get(this, next)?.title ?: ""} (pause to stop it)")
+        main.removeCallbacks(startNext)
+        main.postDelayed(startNext, 5000)
+    }
+
+    /** Starts the waiting next book now (also when Play is pressed during the pause between books). */
+    private fun startPendingNext() {
+        main.removeCallbacks(startNext)
+        val first = pendingNext ?: return
+        pendingNext = null
+        val from = continuedFrom
+        // if a book can't be opened (moved or deleted file), try the next one
+        val tried = HashSet<String>()
+        var id: String? = first
+        while (id != null && id !in tried) {
+            tried += id
+            if (load(id)) { continuedFrom = from; play(); return }
+            CrashReport.note(this, "next book couldn't be opened: $id")
+            id = if (Settings.autoNextBook(this)) nextBookAfter(from ?: id, tried) else null
+        }
+        releaseWake()
+        update()
+        toast("Couldn't open the next book.")
+    }
+
+    /** Cancels the waiting next book. Returns true if there was one. */
+    private fun cancelPendingNext(): Boolean {
+        if (pendingNext == null) return false
+        main.removeCallbacks(startNext)
+        pendingNext = null
+        releaseWake()
+        update()
+        toast("Stopped. The next book won't start.")
+        return true
     }
 
     /** The book to play when one ends and Up next is empty: Want to read first, then a book you've started,
-     *  then the newest one you haven't. Finished books are skipped. */
-    private fun nextBookAfter(id: String): String? {
-        val all = Library.load(this).filter { it.id != id && Collections.FINISHED !in Collections.of(this, it.id) }
+     *  then the newest one you haven't, then any other unfinished one. Finished books are skipped. */
+    private fun nextBookAfter(id: String, skip: Set<String> = emptySet()): String? {
+        val all = Library.load(this).filter { it.id != id && it.id !in skip && Collections.FINISHED !in Collections.of(this, it.id) }
         all.filter { Collections.WANT in Collections.of(this, it.id) }.maxByOrNull { it.added }?.let { return it.id }
         all.filter { Library.percent(this, it) in 1..97 }.maxByOrNull { Library.opened(this, it.id) }?.let { return it.id }
-        return all.filter { Library.percent(this, it) == 0 }.maxByOrNull { it.added }?.id
+        all.filter { Library.percent(this, it) == 0 }.maxByOrNull { it.added }?.let { return it.id }
+        return all.maxByOrNull { Library.opened(this, it.id) }?.id
     }
 
     private fun parse(id: String?): Pair<Int, Int>? {
@@ -873,6 +931,7 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
         val pct = if (paras.isNotEmpty()) (index + 1) * 100 / paras.size else 0
         val ch = chapterIndexOf(index).let { if (it >= 0) chapters[it].title else null }
         val parts = ArrayList<String>()
+        pendingNext?.let { n -> return "Finished · next: ${Library.get(this, n)?.title ?: "the next book"} in a moment (pause to stop)" }
         parts += if (playing) "Reading" else "Paused"
         if (ch != null) parts += ch
         parts += "$pct%"

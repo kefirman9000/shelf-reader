@@ -25,6 +25,15 @@ object SelfTest {
                 // background sounds play under the voice the whole way, as a user would have them
                 Ambience.setMix(ctx, mapOf("rain" to 0.5f, "fire" to 0.4f)); Ambience.setOn(ctx, true)
                 if (voice != null) Settings.setBookVoice(ctx, id, voice)
+                // "Keep listening": a second, short book must start by itself when this one ends
+                val nextId = "selftest-next"
+                val nf = java.io.File(Library.dir(ctx), "$nextId.txt")
+                nf.writeText("The next book.\n\nThis short book should start by itself when the first one ends. It has a few sentences, and then it ends too.\n")
+                if (Library.get(ctx, nextId) == null) Library.add(ctx, Book(nextId, "Next book", "Test", nf.name, "txt", System.currentTimeMillis()))
+                if (voice != null) Settings.setBookVoice(ctx, nextId, voice)
+                Settings.setBookRate(ctx, nextId, 3f)
+                Settings.setAutoNextBook(ctx, true)
+                Settings.setQueue(ctx, emptyList())
                 ctx.startForegroundService(android.content.Intent(ctx, TtsService::class.java).setAction(TtsService.ACTION_PLAY).putExtra(TtsService.EXTRA_BOOK, id))
                 var lastSeg = -1; var still = 0; var started2 = false
                 for (tick in 0 until 1500) {
@@ -33,10 +42,22 @@ object SelfTest {
                     val (seg, total, _) = s.testState()
                     if (s.playing) started2 = true
                     if (seg != lastSeg) { Log.i(TAG, "at ${seg + 1}/$total: ${s.currentSegText()?.take(60)}"); lastSeg = seg; still = 0 } else still++
-                    if (started2 && !s.playing) {
+                    if (started2 && !s.playing && s.bookId == id) {
                         val ok = seg >= total - 3
                         Log.i(TAG, "stopped at ${seg + 1}/$total, stalls recovered: ${s.testStallsTotal()}")
-                        Log.i(TAG, if (ok) "SELFTEST DONE OK" else "SELFTEST FAILED: stopped before the end")
+                        if (!ok) { Log.i(TAG, "SELFTEST FAILED: stopped before the end"); return@Thread }
+                        if (Collections.FINISHED !in Collections.of(ctx, id)) { Log.e(TAG, "SELFTEST FAILED: the book wasn't marked finished"); return@Thread }
+                        // the next book should be waiting, then start by itself within a few seconds
+                        Log.i(TAG, "next book waiting: ${s.pendingNext}")
+                        var startedNext = false
+                        for (w in 0 until 30) {
+                            Thread.sleep(1000)
+                            val s2 = TtsService.instance ?: continue
+                            if (s2.bookId == nextId && s2.playing) { startedNext = true; break }
+                        }
+                        Log.i(TAG, if (startedNext) "next book started by itself" else "next book didn't start")
+                        Log.i(TAG, if (startedNext) "SELFTEST DONE OK" else "SELFTEST FAILED: Keep listening didn't start the next book")
+                        if (startedNext) ctx.startService(android.content.Intent(ctx, TtsService::class.java).setAction(TtsService.ACTION_PAUSE))
                         return@Thread
                     }
                     if (still > 120) { Log.e(TAG, "SELFTEST FAILED: stuck at ${seg + 1}/$total for 2 minutes"); return@Thread }
