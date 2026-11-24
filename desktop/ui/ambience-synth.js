@@ -15,12 +15,12 @@
     { id: 'white', icon: '⚪', name: 'White noise' },
     { id: 'pink', icon: '🌸', name: 'Pink noise' },
     { id: 'brown', icon: '🟤', name: 'Brown noise' },
-    { id: 'birds', icon: '🐦', name: 'Morning birds' },
-    { id: 'chimes', icon: '🎐', name: 'Wind chimes' },
-    { id: 'roof', icon: '🏠', name: 'Rain on a roof' },
-    { id: 'train', icon: '🚆', name: 'Train journey' },
+    { id: 'soft', icon: '☁', name: 'Soft noise' },
+    { id: 'drone', icon: '🎵', name: 'Deep drone' },
+    { id: 'airplane', icon: '✈', name: 'Airplane cabin' },
+    { id: 'train', icon: '🚆', name: 'Train rumble' },
+    { id: 'underwater', icon: '🫧', name: 'Underwater' },
     { id: 'clock', icon: '🕰', name: 'Ticking clock' },
-    { id: 'purr', icon: '🐈', name: 'Cat purring' },
   ];
   const PRESETS = [
     { name: 'Rainy night', mix: { rain: 0.6, thunder: 0.35 } },
@@ -28,16 +28,17 @@
     { name: 'By the fire', mix: { fire: 0.6, rain: 0.3 } },
     { name: 'Summer night', mix: { crickets: 0.5, stream: 0.3 } },
     { name: 'Focus', mix: { brown: 0.5 } },
-    { name: 'Thunderstorm', mix: { roof: 0.6, thunder: 0.6, wind: 0.3 } },
-    { name: 'Cozy cabin', mix: { fire: 0.55, roof: 0.4, wind: 0.25 } },
-    { name: 'Train ride', mix: { train: 0.65, rain: 0.2 } },
-    { name: 'Morning garden', mix: { birds: 0.5, stream: 0.3, chimes: 0.2 } },
-    { name: 'Cat nap', mix: { purr: 0.55, clock: 0.3, fire: 0.25 } },
-    { name: 'Deep sleep', mix: { brown: 0.45, roof: 0.3 } },
+    { name: 'Thunderstorm', mix: { rain: 0.6, thunder: 0.6, wind: 0.3 } },
+    { name: 'Cozy cabin', mix: { fire: 0.55, rain: 0.3, wind: 0.25 } },
+    { name: 'Night flight', mix: { airplane: 0.65, soft: 0.2 } },
+    { name: 'Night train', mix: { train: 0.6, brown: 0.25 } },
+    { name: 'Deep focus', mix: { drone: 0.45, brown: 0.35 } },
+    { name: 'Deep sleep', mix: { brown: 0.45, soft: 0.35 } },
+    { name: 'Underwater', mix: { underwater: 0.6, drone: 0.2 } },
   ];
   // per-sound level so each one is about as loud as the others at the same slider position
-  const GAIN = { rain: 0.36, thunder: 3.2, waves: 0.64, stream: 0.62, wind: 1.25, fire: 2.9, crickets: 1.25, fan: 1.4, white: 0.12, pink: 0.24, brown: 0.87,
-    birds: 2.4, chimes: 0.95, roof: 1.1, train: 0.5, clock: 2, purr: 1.6 };
+  const GAIN = { rain: 0.3, thunder: 3.2, waves: 0.64, stream: 0.62, wind: 1.25, fire: 2.9, crickets: 1.25, fan: 1.4, white: 0.12, pink: 0.24, brown: 0.87,
+    soft: 0.3, drone: 1.5, airplane: 0.5, train: 0.55, underwater: 0.55, clock: 2 };
 
   function rng(seed) {
     let s = seed >>> 0 || 1;
@@ -62,21 +63,6 @@
       case 'fan': {
         let l1 = 0, l2 = 0; const a = coef(700, sr), t = 2 * Math.PI * 58 / sr; let ph = 0;
         return () => { const x = brown() * 0.7 + pink() * 0.5; l1 += a * (x - l1); l2 += a * (l1 - l2); ph += t; return l2 + Math.sin(ph) * 0.012; };
-      }
-      case 'rain': {
-        let hp = 0, lp = 0, wob = 0, wobT = 0.5, wobN = 0;
-        const aHp = coef(600, sr), aLp = coef(6500, sr), aW = coef(0.4, sr);
-        const env = new Float32Array(12), dec = new Float32Array(12); let dh = 0;
-        const aDh = coef(2500, sr);
-        return () => {
-          const x = w(); hp += aHp * (x - hp); const hiss = x - hp; lp += aLp * (hiss - lp);
-          if (--wobN <= 0) { wobT = 0.75 + r() * 0.35; wobN = sec(0.5, 2); }
-          wob += aW * (wobT - wob);
-          if (r() < 70 / sr) for (let i = 0; i < 12; i++) if (env[i] < 0.001) { const a = r(); env[i] = 0.25 + a * a * 1.2; dec[i] = Math.exp(-1 / (sr * (0.003 + r() * 0.01))); break; }
-          let d = 0; const y = w(); dh += aDh * (y - dh); const dn = y - dh;
-          for (let i = 0; i < 12; i++) if (env[i] > 0.001) { d += env[i] * dn; env[i] *= dec[i]; }
-          return lp * 0.55 * wob + d * 0.35;
-        };
       }
       case 'thunder': {
         let next = sec(2, 6), t = 0, att = 1, peak = 0, tau = 1, lvl = 0, lp1 = 0, lp2 = 0, a = coef(200, sr), fl = 0, flT = 1, flN = 0, bed = 0;
@@ -147,88 +133,6 @@
           return bed2 * 0.5 + c * 0.6;
         };
       }
-      case 'birds': {
-        // a few birds, each singing short phrases of quick chirps (pitch sweeps), with pauses between
-        const bd = [];
-        for (let i = 0; i < 4; i++) bd.push({ next: sec(0.2, 2), syl: 0, n: 0, t: 0, len: 0, gap: 0, after: 0, f0: 0, f1: 0, ph: 0, base: 2600 + r() * 2200, v: 0.4 + r() * 0.6, style: Math.floor(r() * 3) });
-        let bed = 0, bed2 = 0; const aB = coef(1500, sr), aB2 = coef(300, sr);
-        return () => {
-          let s = 0;
-          for (const b of bd) {
-            if (b.n === 0) { if (--b.next <= 0) { b.n = 3 + Math.floor(r() * 6); b.syl = 0; b.t = 0; b.len = 0; b.gap = 0; } continue; }
-            if (b.t >= b.len) {
-              if (b.gap > 0) { b.gap--; continue; }
-              if (b.syl >= b.n) { b.n = 0; b.next = sec(0.8, 4.5); continue; }
-              b.syl++; b.t = 0; b.len = sec(0.04, 0.13); b.after = sec(0.03, 0.12);
-              const up = b.style === 0 ? 1 : b.style === 1 ? -1 : (r() < 0.5 ? 1 : -1);
-              b.f0 = b.base * (0.85 + r() * 0.3); b.f1 = b.f0 * (1 + up * (0.2 + r() * 0.5));
-            }
-            const p = b.t / b.len; const f = b.f0 + (b.f1 - b.f0) * p;
-            b.ph += 2 * Math.PI * f / sr; if (b.ph > 1000) b.ph -= 4 * Math.PI * Math.floor(b.ph / (4 * Math.PI));
-            const e = Math.sin(Math.PI * p);
-            s += Math.sin(b.ph + 0.4 * Math.sin(b.ph * 0.5)) * e * e * b.v;
-            if (++b.t >= b.len) b.gap = b.after;
-          }
-          const x = pink(); bed += aB * (x - bed); bed2 += aB2 * (bed - bed2);
-          return s * 0.22 + (bed - bed2) * 0.04;
-        };
-      }
-      case 'chimes': {
-        // wind chimes tuned to a pentatonic scale, struck more often when the wind picks up
-        const notes = [1, 9 / 8, 5 / 4, 3 / 2, 5 / 3, 2].map((k) => 523.25 * k);
-        const vo = []; for (let i = 0; i < 8; i++) vo.push({ a: 0, d: 0, w1: 0, w2: 0, p1: 0, p2: 0 });
-        let wind = 0.3, windT = 0.3, nw = 0; const aW = coef(0.3, sr);
-        let air = 0, air2 = 0; const aA = coef(700, sr);
-        return () => {
-          if (--nw <= 0) { windT = r() * r(); nw = sec(2, 6); }
-          wind += aW * (windT - wind);
-          if (r() < (0.5 + wind * 5) / sr) {
-            for (const v of vo) if (v.a < 0.002) { const f = notes[Math.floor(r() * notes.length)]; v.a = 0.3 + r() * 0.7; v.d = Math.exp(-1 / (sr * (1.5 + r() * 2))); v.w1 = 2 * Math.PI * f / sr; v.w2 = 2 * Math.PI * f * 2.76 / sr; v.p1 = 0; v.p2 = 0; break; }
-          }
-          let s = 0;
-          for (const v of vo) if (v.a >= 0.002) { v.p1 += v.w1; v.p2 += v.w2; s += v.a * (Math.sin(v.p1) + 0.35 * v.a * Math.sin(v.p2)); v.a *= v.d; }
-          const x = pink(); air += aA * (x - air); air2 += aA * (air - air2);
-          return s * 0.25 + air2 * wind * 0.5;
-        };
-      }
-      case 'roof': {
-        // rain on a roof: muffled patter, heavier drops thudding, and now and then a drip from the gutter
-        let lp = 0, lp2 = 0, wob = 0.8, wobT = 0.8, wobN = 0; const aLp = coef(1100, sr), aW = coef(0.3, sr);
-        const env = new Float64Array(10), dec = new Float64Array(10); let th = 0, th2 = 0; const aTh = coef(260, sr);
-        let drip = 0, dripD = Math.exp(-1 / (sr * 0.05)), dripW = 0, dripP = 0, nextDrip = sec(1, 4);
-        const rise = Math.exp(Math.log(1.6) / (sr * 0.05));
-        return () => {
-          const x = w(); lp += aLp * (x - lp); lp2 += aLp * (lp - lp2);
-          if (--wobN <= 0) { wobT = 0.7 + r() * 0.4; wobN = sec(0.7, 2.5); }
-          wob += aW * (wobT - wob);
-          if (r() < 45 / sr) for (let i = 0; i < 10; i++) if (env[i] < 0.001) { const a = r(); env[i] = 0.3 + a * a * 1.4; dec[i] = Math.exp(-1 / (sr * (0.006 + r() * 0.02))); break; }
-          const y = w(); th += aTh * (y - th); th2 += aTh * (th - th2);
-          let d = 0; for (let i = 0; i < 10; i++) if (env[i] > 0.001) { d += env[i] * th2; env[i] *= dec[i]; }
-          if (--nextDrip <= 0) { drip = 0.5 + r() * 0.5; dripW = 2 * Math.PI * (900 + r() * 500) / sr; dripP = 0; nextDrip = sec(0.6, 3.5); }
-          let dr = 0; if (drip > 0.001) { dripW *= rise; dripP += dripW; dr = Math.sin(dripP) * drip; drip *= dripD; }
-          return lp2 * 0.9 * wob + d * 1.6 + dr * 0.12;
-        };
-      }
-      case 'train': {
-        // a train journey: a low swaying rumble and the clickety-clack of wheels over the rail joints
-        let lp = 0, lp2 = 0, sway = 0.8, swayT = 0.8, ns = 0; const aLp = coef(140, sr), aS = coef(0.5, sr);
-        let hp = 0, bp = 0; const aHp = coef(500, sr), aBp = coef(2200, sr);
-        const per = sec(0.95, 1.15); const gapW = Math.floor(sr * 0.11);
-        const hits = [0, gapW, Math.floor(per * 0.55), Math.floor(per * 0.55) + gapW];
-        let t = 0, env = 0, thump = 0, tp = 0; const envD = Math.exp(-1 / (sr * 0.018)), thD = Math.exp(-1 / (sr * 0.06)), tw = 2 * Math.PI * 55 / sr;
-        return () => {
-          if (--ns <= 0) { swayT = 0.65 + r() * 0.45; ns = sec(1, 3); }
-          sway += aS * (swayT - sway);
-          if (++t >= per) t = 0;
-          if (t === hits[0] || t === hits[1] || t === hits[2] || t === hits[3]) { env = 0.7 + r() * 0.3; thump = 0.6 + r() * 0.4; }
-          const x = brown(); lp += aLp * (x - lp); lp2 += aLp * (lp - lp2);
-          const y = w(); hp += aHp * (y - hp); bp += aBp * ((y - hp) - bp);
-          tp += tw; if (tp > 2 * Math.PI) tp -= 2 * Math.PI;
-          const c = bp * env + Math.sin(tp) * thump * 0.5;
-          env *= envD; thump *= thD;
-          return lp2 * 2.2 * sway + c * 0.6;
-        };
-      }
       case 'clock': {
         // a ticking clock: tick… tock… twice a second, each with a little wooden ring
         const per = Math.floor(sr * 0.5); let t = per - sec(0.05, 0.4), tock = false;
@@ -243,17 +147,69 @@
           return s;
         };
       }
-      case 'purr': {
-        // a cat purring: low rumbling pulses about 25 times a second, breathing in and out
-        let lp = 0, lp2 = 0; const aLp = coef(320, sr);
-        let ph = 0, rate = 25, brLen = sec(1.0, 1.5), inhale = true, t = 0;
+      case 'rain': {
+        // steady rain: an even hiss with a soft body underneath, gently getting heavier and lighter
+        let hp = 0, lp = 0, body = 0, body2 = 0, wob = 0.85, wobT = 0.85, wobN = 0;
+        const aHp = coef(500, sr), aLp = coef(5500, sr), aB = coef(900, sr), aW = coef(0.25, sr);
         return () => {
-          if (++t >= brLen) { t = 0; inhale = !inhale; brLen = inhale ? sec(1.0, 1.4) : sec(1.2, 1.8); rate = inhale ? 22 + r() * 3 : 25 + r() * 4; }
-          const breath = Math.pow(Math.sin(Math.PI * t / brLen), 0.6) * (inhale ? 0.6 : 1);
-          ph += 2 * Math.PI * rate / sr; if (ph > 2 * Math.PI) ph -= 2 * Math.PI;
-          const pulse = Math.pow(Math.max(0, Math.sin(ph)), 3);
-          const x = brown() * 0.8 + pink() * 0.3; lp += aLp * (x - lp); lp2 += aLp * (lp - lp2);
-          return lp2 * (0.15 + pulse) * breath * 1.6;
+          const x = w(); hp += aHp * (x - hp); lp += aLp * ((x - hp) - lp);
+          const y = pink(); body += aB * (y - body); body2 += aB * (body - body2);
+          if (--wobN <= 0) { wobT = 0.75 + r() * 0.3; wobN = sec(1.5, 4); }
+          wob += aW * (wobT - wob);
+          return (lp * 0.55 + body2 * 0.7) * wob;
+        };
+      }
+      case 'soft': {
+        // soft noise: pink noise with the hiss taken off, like a distant waterfall or a quiet room fan
+        let a1 = 0, a2 = 0, a3 = 0; const a = coef(1100, sr);
+        return () => { const x = pink(); a1 += a * (x - a1); a2 += a * (a1 - a2); a3 += a * (a2 - a3); return a3 * 1.6; };
+      }
+      case 'drone': {
+        // a deep, warm drone: a few low tones, slightly out of tune with each other so they slowly beat,
+        // breathing in and out very slowly, over a little soft noise
+        const fs = [55, 55.3, 82.4, 110.2, 164.7], amp = [1, 0.8, 0.5, 0.35, 0.15];
+        const ph = fs.map(() => r() * 6.283), wv = fs.map((f) => 2 * Math.PI * f / sr);
+        let br1 = 0, brT = 1, brN = 0, lp = 0, lp2 = 0; const aBr = coef(0.08, sr), aLp = coef(400, sr);
+        return () => {
+          if (--brN <= 0) { brT = 0.7 + r() * 0.3; brN = sec(4, 9); }
+          br1 += aBr * (brT - br1);
+          let s = 0;
+          for (let i = 0; i < fs.length; i++) { ph[i] += wv[i]; if (ph[i] > 6.283185307179586) ph[i] -= 6.283185307179586; s += Math.sin(ph[i]) * amp[i]; }
+          const x = brown(); lp += aLp * (x - lp); lp2 += aLp * (lp - lp2);
+          return s * 0.12 * br1 + lp2 * 0.25;
+        };
+      }
+      case 'airplane': {
+        // inside an airliner at night: a steady, deep roar of the engines and air, with a low engine hum
+        let lp = 0, lp2 = 0, hp = 0, mid = 0, mid2 = 0; const aLp = coef(260, sr), aHp = coef(150, sr), aM = coef(1400, sr);
+        const h1 = 2 * Math.PI * 92 / sr, h2 = 2 * Math.PI * 184.5 / sr; let p1 = 0, p2 = 0;
+        return () => {
+          const x = brown(); lp += aLp * (x - lp); lp2 += aLp * (lp - lp2);
+          const y = pink(); hp += aHp * (y - hp); mid += aM * ((y - hp) - mid); mid2 += aM * (mid - mid2);
+          p1 += h1; if (p1 > 6.283185307179586) p1 -= 6.283185307179586; p2 += h2; if (p2 > 6.283185307179586) p2 -= 6.283185307179586;
+          return lp2 * 1.6 + mid2 * 0.9 + Math.sin(p1) * 0.02 + Math.sin(p2) * 0.01;
+        };
+      }
+      case 'train': {
+        // the low rumble of a train carriage, swaying slowly
+        let lp = 0, lp2 = 0, lp3 = 0, sway = 0.85, swayT = 0.85, ns = 0, mid = 0, mid2 = 0;
+        const aLp = coef(120, sr), aS = coef(0.35, sr), aM = coef(600, sr);
+        return () => {
+          if (--ns <= 0) { swayT = 0.7 + r() * 0.3; ns = sec(1.5, 4); }
+          sway += aS * (swayT - sway);
+          const x = brown(); lp += aLp * (x - lp); lp2 += aLp * (lp - lp2); lp3 += aLp * (lp2 - lp3);
+          const y = pink(); mid += aM * (y - mid); mid2 += aM * (mid - mid2);
+          return (lp3 * 2.6 + mid2 * 0.35) * sway;
+        };
+      }
+      case 'underwater': {
+        // deep under water: a muffled, slowly swelling low rush
+        let lp = 0, lp2 = 0, lp3 = 0, sw = 0.8, swT = 0.8, ns = 0; const aLp = coef(220, sr), aS = coef(0.12, sr);
+        return () => {
+          if (--ns <= 0) { swT = 0.55 + r() * 0.45; ns = sec(3, 7); }
+          sw += aS * (swT - sw);
+          const x = brown() * 0.8 + pink() * 0.4; lp += aLp * (x - lp); lp2 += aLp * (lp - lp2); lp3 += aLp * (lp2 - lp3);
+          return lp3 * 2.4 * sw;
         };
       }
       case 'crickets': {

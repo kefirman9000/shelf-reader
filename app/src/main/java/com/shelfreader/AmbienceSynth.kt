@@ -27,12 +27,12 @@ object AmbienceSynth {
         Sound("white", "⚪", "White noise"),
         Sound("pink", "🌸", "Pink noise"),
         Sound("brown", "🟤", "Brown noise"),
-        Sound("birds", "🐦", "Morning birds"),
-        Sound("chimes", "🎐", "Wind chimes"),
-        Sound("roof", "🏠", "Rain on a roof"),
-        Sound("train", "🚆", "Train journey"),
+        Sound("soft", "☁", "Soft noise"),
+        Sound("drone", "🎵", "Deep drone"),
+        Sound("airplane", "✈", "Airplane cabin"),
+        Sound("train", "🚆", "Train rumble"),
+        Sound("underwater", "🫧", "Underwater"),
         Sound("clock", "🕰", "Ticking clock"),
-        Sound("purr", "🐈", "Cat purring"),
     )
 
     val PRESETS = listOf(
@@ -41,18 +41,19 @@ object AmbienceSynth {
         "By the fire" to mapOf("fire" to 0.6f, "rain" to 0.3f),
         "Summer night" to mapOf("crickets" to 0.5f, "stream" to 0.3f),
         "Focus" to mapOf("brown" to 0.5f),
-        "Thunderstorm" to mapOf("roof" to 0.6f, "thunder" to 0.6f, "wind" to 0.3f),
-        "Cozy cabin" to mapOf("fire" to 0.55f, "roof" to 0.4f, "wind" to 0.25f),
-        "Train ride" to mapOf("train" to 0.65f, "rain" to 0.2f),
-        "Morning garden" to mapOf("birds" to 0.5f, "stream" to 0.3f, "chimes" to 0.2f),
-        "Cat nap" to mapOf("purr" to 0.55f, "clock" to 0.3f, "fire" to 0.25f),
-        "Deep sleep" to mapOf("brown" to 0.45f, "roof" to 0.3f),
+        "Thunderstorm" to mapOf("rain" to 0.6f, "thunder" to 0.6f, "wind" to 0.3f),
+        "Cozy cabin" to mapOf("fire" to 0.55f, "rain" to 0.3f, "wind" to 0.25f),
+        "Night flight" to mapOf("airplane" to 0.65f, "soft" to 0.2f),
+        "Night train" to mapOf("train" to 0.6f, "brown" to 0.25f),
+        "Deep focus" to mapOf("drone" to 0.45f, "brown" to 0.35f),
+        "Deep sleep" to mapOf("brown" to 0.45f, "soft" to 0.35f),
+        "Underwater" to mapOf("underwater" to 0.6f, "drone" to 0.2f),
     )
 
     /** Per-sound level so each is about as loud as the others at the same slider position. */
-    val GAIN = mapOf("rain" to 0.36, "thunder" to 3.2, "waves" to 0.64, "stream" to 0.62, "wind" to 1.25, "fire" to 2.9,
+    val GAIN = mapOf("rain" to 0.3, "thunder" to 3.2, "waves" to 0.64, "stream" to 0.62, "wind" to 1.25, "fire" to 2.9,
         "crickets" to 1.25, "fan" to 1.4, "white" to 0.12, "pink" to 0.24, "brown" to 0.87,
-        "birds" to 2.4, "chimes" to 0.95, "roof" to 1.1, "train" to 0.5, "clock" to 2.0, "purr" to 1.6)
+        "soft" to 0.3, "drone" to 1.5, "airplane" to 0.5, "train" to 0.55, "underwater" to 0.55, "clock" to 2.0)
 
     fun interface Gen { fun next(): Double }
 
@@ -82,20 +83,6 @@ object AmbienceSynth {
             "fan" -> {
                 var l1 = 0.0; var l2 = 0.0; val a = coef(700.0, sr); val t = 2 * PI * 58 / sr; var ph = 0.0
                 Gen { val x = brown() * 0.7 + pink() * 0.5; l1 += a * (x - l1); l2 += a * (l1 - l2); ph += t; l2 + sin(ph) * 0.012 }
-            }
-            "rain" -> {
-                var hp = 0.0; var lp = 0.0; var wob = 0.0; var wobT = 0.5; var wobN = 0
-                val aHp = coef(600.0, sr); val aLp = coef(6500.0, sr); val aW = coef(0.4, sr)
-                val env = DoubleArray(12); val dec = DoubleArray(12); var dh = 0.0; val aDh = coef(2500.0, sr)
-                Gen {
-                    val x = w(); hp += aHp * (x - hp); val hiss = x - hp; lp += aLp * (hiss - lp)
-                    if (--wobN <= 0) { wobT = 0.75 + r.next() * 0.35; wobN = sec(0.5, 2.0) }
-                    wob += aW * (wobT - wob)
-                    if (r.next() < 70.0 / sr) for (i in 0 until 12) if (env[i] < 0.001) { val a = r.next(); env[i] = 0.25 + a * a * 1.2; dec[i] = exp(-1 / (sr * (0.003 + r.next() * 0.01))); break }
-                    var d = 0.0; val y = w(); dh += aDh * (y - dh); val dn = y - dh
-                    for (i in 0 until 12) if (env[i] > 0.001) { d += env[i] * dn; env[i] *= dec[i] }
-                    lp * 0.55 * wob + d * 0.35
-                }
             }
             "thunder" -> {
                 var next = sec(2.0, 6.0); var t = 0; var att = 1; var peak = 0.0; var tau = 1.0; var lp1 = 0.0; var lp2 = 0.0
@@ -175,94 +162,6 @@ object AmbienceSynth {
                     bed2 * 0.5 + c * 0.6
                 }
             }
-            "birds" -> {
-                // a few birds, each singing short phrases of quick chirps (pitch sweeps), with pauses between
-                class Bd(var next: Int, var syl: Int, var n: Int, var t: Int, var len: Int, var gap: Int, var after: Int,
-                         var f0: Double, var f1: Double, var ph: Double, val base: Double, val v: Double, val style: Int)
-                val bd = List(4) { Bd(sec(0.2, 2.0), 0, 0, 0, 0, 0, 0, 0.0, 0.0, 0.0, 2600 + r.next() * 2200, 0.4 + r.next() * 0.6, floor(r.next() * 3).toInt()) }
-                var bed = 0.0; var bed2 = 0.0; val aB = coef(1500.0, sr); val aB2 = coef(300.0, sr)
-                Gen {
-                    var s = 0.0
-                    for (b in bd) {
-                        if (b.n == 0) { if (--b.next <= 0) { b.n = 3 + floor(r.next() * 6).toInt(); b.syl = 0; b.t = 0; b.len = 0; b.gap = 0 }; continue }
-                        if (b.t >= b.len) {
-                            if (b.gap > 0) { b.gap--; continue }
-                            if (b.syl >= b.n) { b.n = 0; b.next = sec(0.8, 4.5); continue }
-                            b.syl++; b.t = 0; b.len = sec(0.04, 0.13); b.after = sec(0.03, 0.12)
-                            val up = if (b.style == 0) 1 else if (b.style == 1) -1 else (if (r.next() < 0.5) 1 else -1)
-                            b.f0 = b.base * (0.85 + r.next() * 0.3); b.f1 = b.f0 * (1 + up * (0.2 + r.next() * 0.5))
-                        }
-                        val p = b.t.toDouble() / b.len; val f = b.f0 + (b.f1 - b.f0) * p
-                        b.ph += 2 * PI * f / sr; if (b.ph > 1000) b.ph -= 4 * PI * floor(b.ph / (4 * PI))
-                        val e = sin(PI * p)
-                        s += sin(b.ph + 0.4 * sin(b.ph * 0.5)) * e * e * b.v
-                        if (++b.t >= b.len) b.gap = b.after
-                    }
-                    val x = pink(); bed += aB * (x - bed); bed2 += aB2 * (bed - bed2)
-                    s * 0.22 + (bed - bed2) * 0.04
-                }
-            }
-            "chimes" -> {
-                // wind chimes tuned to a pentatonic scale, struck more often when the wind picks up
-                val notes = doubleArrayOf(1.0, 9.0 / 8, 5.0 / 4, 3.0 / 2, 5.0 / 3, 2.0).map { 523.25 * it }
-                val a = DoubleArray(8); val d = DoubleArray(8); val w1 = DoubleArray(8); val w2 = DoubleArray(8); val p1 = DoubleArray(8); val p2 = DoubleArray(8)
-                var wind = 0.3; var windT = 0.3; var nw = 0; val aW = coef(0.3, sr)
-                var air = 0.0; var air2 = 0.0; val aA = coef(700.0, sr)
-                Gen {
-                    if (--nw <= 0) { windT = r.next() * r.next(); nw = sec(2.0, 6.0) }
-                    wind += aW * (windT - wind)
-                    if (r.next() < (0.5 + wind * 5) / sr) {
-                        for (i in 0 until 8) if (a[i] < 0.002) {
-                            val f = notes[floor(r.next() * notes.size).toInt()]
-                            a[i] = 0.3 + r.next() * 0.7; d[i] = exp(-1 / (sr * (1.5 + r.next() * 2))); w1[i] = 2 * PI * f / sr; w2[i] = 2 * PI * f * 2.76 / sr; p1[i] = 0.0; p2[i] = 0.0
-                            break
-                        }
-                    }
-                    var s = 0.0
-                    for (i in 0 until 8) if (a[i] >= 0.002) { p1[i] += w1[i]; p2[i] += w2[i]; s += a[i] * (sin(p1[i]) + 0.35 * a[i] * sin(p2[i])); a[i] *= d[i] }
-                    val x = pink(); air += aA * (x - air); air2 += aA * (air - air2)
-                    s * 0.25 + air2 * wind * 0.5
-                }
-            }
-            "roof" -> {
-                // rain on a roof: muffled patter, heavier drops thudding, and now and then a drip from the gutter
-                var lp = 0.0; var lp2 = 0.0; var wob = 0.8; var wobT = 0.8; var wobN = 0; val aLp = coef(1100.0, sr); val aW = coef(0.3, sr)
-                val env = DoubleArray(10); val dec = DoubleArray(10); var th = 0.0; var th2 = 0.0; val aTh = coef(260.0, sr)
-                var drip = 0.0; val dripD = exp(-1 / (sr * 0.05)); var dripW = 0.0; var dripP = 0.0; var nextDrip = sec(1.0, 4.0)
-                val rise = exp(kotlin.math.ln(1.6) / (sr * 0.05))
-                Gen {
-                    val x = w(); lp += aLp * (x - lp); lp2 += aLp * (lp - lp2)
-                    if (--wobN <= 0) { wobT = 0.7 + r.next() * 0.4; wobN = sec(0.7, 2.5) }
-                    wob += aW * (wobT - wob)
-                    if (r.next() < 45.0 / sr) for (i in 0 until 10) if (env[i] < 0.001) { val k = r.next(); env[i] = 0.3 + k * k * 1.4; dec[i] = exp(-1 / (sr * (0.006 + r.next() * 0.02))); break }
-                    val y = w(); th += aTh * (y - th); th2 += aTh * (th - th2)
-                    var dd = 0.0; for (i in 0 until 10) if (env[i] > 0.001) { dd += env[i] * th2; env[i] *= dec[i] }
-                    if (--nextDrip <= 0) { drip = 0.5 + r.next() * 0.5; dripW = 2 * PI * (900 + r.next() * 500) / sr; dripP = 0.0; nextDrip = sec(0.6, 3.5) }
-                    var dr = 0.0; if (drip > 0.001) { dripW *= rise; dripP += dripW; dr = sin(dripP) * drip; drip *= dripD }
-                    lp2 * 0.9 * wob + dd * 1.6 + dr * 0.12
-                }
-            }
-            "train" -> {
-                // a train journey: a low swaying rumble and the clickety-clack of wheels over the rail joints
-                var lp = 0.0; var lp2 = 0.0; var sway = 0.8; var swayT = 0.8; var ns = 0; val aLp = coef(140.0, sr); val aS = coef(0.5, sr)
-                var hp = 0.0; var bp = 0.0; val aHp = coef(500.0, sr); val aBp = coef(2200.0, sr)
-                val per = sec(0.95, 1.15); val gapW = floor(sr * 0.11).toInt()
-                val h2 = floor(per * 0.55).toInt(); val hits = intArrayOf(0, gapW, h2, h2 + gapW)
-                var t = 0; var env = 0.0; var thump = 0.0; var tp = 0.0
-                val envD = exp(-1 / (sr * 0.018)); val thD = exp(-1 / (sr * 0.06)); val tw = 2 * PI * 55 / sr
-                Gen {
-                    if (--ns <= 0) { swayT = 0.65 + r.next() * 0.45; ns = sec(1.0, 3.0) }
-                    sway += aS * (swayT - sway)
-                    if (++t >= per) t = 0
-                    if (t == hits[0] || t == hits[1] || t == hits[2] || t == hits[3]) { env = 0.7 + r.next() * 0.3; thump = 0.6 + r.next() * 0.4 }
-                    val x = brown(); lp += aLp * (x - lp); lp2 += aLp * (lp - lp2)
-                    val y = w(); hp += aHp * (y - hp); bp += aBp * ((y - hp) - bp)
-                    tp += tw; if (tp > 2 * PI) tp -= 2 * PI
-                    val c = bp * env + sin(tp) * thump * 0.5
-                    env *= envD; thump *= thD
-                    lp2 * 2.2 * sway + c * 0.6
-                }
-            }
             "clock" -> {
                 // a ticking clock: tick… tock… twice a second, each with a little wooden ring
                 val per = floor(sr * 0.5).toInt(); var t = per - sec(0.05, 0.4); var tock = false
@@ -277,17 +176,70 @@ object AmbienceSynth {
                     s
                 }
             }
-            "purr" -> {
-                // a cat purring: low rumbling pulses about 25 times a second, breathing in and out
-                var lp = 0.0; var lp2 = 0.0; val aLp = coef(320.0, sr)
-                var ph = 0.0; var rate = 25.0; var brLen = sec(1.0, 1.5); var inhale = true; var t = 0
+            "rain" -> {
+                // steady rain: an even hiss with a soft body underneath, gently getting heavier and lighter
+                var hp = 0.0; var lp = 0.0; var body = 0.0; var body2 = 0.0; var wob = 0.85; var wobT = 0.85; var wobN = 0
+                val aHp = coef(500.0, sr); val aLp = coef(5500.0, sr); val aB = coef(900.0, sr); val aW = coef(0.25, sr)
                 Gen {
-                    if (++t >= brLen) { t = 0; inhale = !inhale; brLen = if (inhale) sec(1.0, 1.4) else sec(1.2, 1.8); rate = if (inhale) 22 + r.next() * 3 else 25 + r.next() * 4 }
-                    val breath = sin(PI * t / brLen).pow(0.6) * (if (inhale) 0.6 else 1.0)
-                    ph += 2 * PI * rate / sr; if (ph > 2 * PI) ph -= 2 * PI
-                    val pulse = maxOf(0.0, sin(ph)).pow(3)
-                    val x = brown() * 0.8 + pink() * 0.3; lp += aLp * (x - lp); lp2 += aLp * (lp - lp2)
-                    lp2 * (0.15 + pulse) * breath * 1.6
+                    val x = w(); hp += aHp * (x - hp); lp += aLp * ((x - hp) - lp)
+                    val y = pink(); body += aB * (y - body); body2 += aB * (body - body2)
+                    if (--wobN <= 0) { wobT = 0.75 + r.next() * 0.3; wobN = sec(1.5, 4.0) }
+                    wob += aW * (wobT - wob)
+                    (lp * 0.55 + body2 * 0.7) * wob
+                }
+            }
+            "soft" -> {
+                // soft noise: pink noise with the hiss taken off, like a distant waterfall or a quiet room fan
+                var a1 = 0.0; var a2 = 0.0; var a3 = 0.0; val a = coef(1100.0, sr)
+                Gen { val x = pink(); a1 += a * (x - a1); a2 += a * (a1 - a2); a3 += a * (a2 - a3); a3 * 1.6 }
+            }
+            "drone" -> {
+                // a deep, warm drone: a few low tones, slightly out of tune with each other so they slowly beat,
+                // breathing in and out very slowly, over a little soft noise
+                val fs = doubleArrayOf(55.0, 55.3, 82.4, 110.2, 164.7); val amp = doubleArrayOf(1.0, 0.8, 0.5, 0.35, 0.15)
+                val ph = DoubleArray(fs.size) { r.next() * 6.283 }; val wv = DoubleArray(fs.size) { 2 * PI * fs[it] / sr }
+                var br1 = 0.0; var brT = 1.0; var brN = 0; var lp = 0.0; var lp2 = 0.0; val aBr = coef(0.08, sr); val aLp = coef(400.0, sr)
+                Gen {
+                    if (--brN <= 0) { brT = 0.7 + r.next() * 0.3; brN = sec(4.0, 9.0) }
+                    br1 += aBr * (brT - br1)
+                    var s = 0.0
+                    for (i in fs.indices) { ph[i] += wv[i]; if (ph[i] > 2 * PI) ph[i] -= 2 * PI; s += sin(ph[i]) * amp[i] }
+                    val x = brown(); lp += aLp * (x - lp); lp2 += aLp * (lp - lp2)
+                    s * 0.12 * br1 + lp2 * 0.25
+                }
+            }
+            "airplane" -> {
+                // inside an airliner at night: a steady, deep roar of the engines and air, with a low engine hum
+                var lp = 0.0; var lp2 = 0.0; var hp = 0.0; var mid = 0.0; var mid2 = 0.0
+                val aLp = coef(260.0, sr); val aHp = coef(150.0, sr); val aM = coef(1400.0, sr)
+                val h1 = 2 * PI * 92 / sr; val h2 = 2 * PI * 184.5 / sr; var p1 = 0.0; var p2 = 0.0
+                Gen {
+                    val x = brown(); lp += aLp * (x - lp); lp2 += aLp * (lp - lp2)
+                    val y = pink(); hp += aHp * (y - hp); mid += aM * ((y - hp) - mid); mid2 += aM * (mid - mid2)
+                    p1 += h1; if (p1 > 2 * PI) p1 -= 2 * PI; p2 += h2; if (p2 > 2 * PI) p2 -= 2 * PI
+                    lp2 * 1.6 + mid2 * 0.9 + sin(p1) * 0.02 + sin(p2) * 0.01
+                }
+            }
+            "train" -> {
+                // the low rumble of a train carriage, swaying slowly
+                var lp = 0.0; var lp2 = 0.0; var lp3 = 0.0; var sway = 0.85; var swayT = 0.85; var ns = 0; var mid = 0.0; var mid2 = 0.0
+                val aLp = coef(120.0, sr); val aS = coef(0.35, sr); val aM = coef(600.0, sr)
+                Gen {
+                    if (--ns <= 0) { swayT = 0.7 + r.next() * 0.3; ns = sec(1.5, 4.0) }
+                    sway += aS * (swayT - sway)
+                    val x = brown(); lp += aLp * (x - lp); lp2 += aLp * (lp - lp2); lp3 += aLp * (lp2 - lp3)
+                    val y = pink(); mid += aM * (y - mid); mid2 += aM * (mid - mid2)
+                    (lp3 * 2.6 + mid2 * 0.35) * sway
+                }
+            }
+            "underwater" -> {
+                // deep under water: a muffled, slowly swelling low rush
+                var lp = 0.0; var lp2 = 0.0; var lp3 = 0.0; var sw = 0.8; var swT = 0.8; var ns = 0; val aLp = coef(220.0, sr); val aS = coef(0.12, sr)
+                Gen {
+                    if (--ns <= 0) { swT = 0.55 + r.next() * 0.45; ns = sec(3.0, 7.0) }
+                    sw += aS * (swT - sw)
+                    val x = brown() * 0.8 + pink() * 0.4; lp += aLp * (x - lp); lp2 += aLp * (lp - lp2); lp3 += aLp * (lp2 - lp3)
+                    lp3 * 2.4 * sw
                 }
             }
             "crickets" -> {
