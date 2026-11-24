@@ -192,6 +192,7 @@ You can also **import** your own DRM-free **EPUB, PDF or TXT** files.
 - **Sleep timer:** 5 to 60 minutes, or the end of the chapter.
 - **Skip clutter:** leaves out page numbers, footnote markers, links and scanning notices.
 - **Pronunciation fixes:** teach it how to say names and words it gets wrong.
+- **Background sounds** (phone and PC): rain, rain on a roof, distant thunder, ocean waves, forest stream, wind, crackling fire, night crickets, morning birds, wind chimes, a train journey, a ticking clock, a purring cat, a fan, and white, pink or brown noise. Each has its own volume, with 11 ready-made mixes, and you can save your own. They play under the book or on their own with no book (▶ Play sounds). They can keep going for a while after the sleep timer stops the book. Pressing pause anywhere (player, notification, headphones, lock screen, Space on PC) stops them too. All are made on the device, so they work offline.
 
 ### Reading
 - **Book view (phone and PC):** pages you turn instead of one long scroll. On the phone, swipe or tap the page edges; tap the middle to hide the buttons. On PC you get two-page spreads on wide windows, and you turn with the arrow keys, the mouse wheel or the page edges (**F** goes full screen). Page numbers, chapter headers, and chapters that start on a new page. While reading aloud, it turns the pages for you. **Scroll view** is one tap away.

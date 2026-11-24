@@ -46,7 +46,7 @@ jobs:
         run: node desktop/test/parity.test.js
 
       - name: Background sounds (PC)
-        run: node desktop/test/ambience.test.js
+        run: node desktop/test/ambience.test.js && node desktop/test/ambience-state.test.js
 
       # the signing key comes from the repository's secrets when they're set (see README → Signing key)
       - name: Signing key

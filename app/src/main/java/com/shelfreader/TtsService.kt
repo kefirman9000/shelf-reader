@@ -48,6 +48,8 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
         const val ACTION_SEEK = "com.shelfreader.SEEK"
         const val ACTION_SLEEP = "com.shelfreader.SLEEP"
         const val ACTION_NOOP = "com.shelfreader.NOOP"
+        /** Play the background sounds on their own, without a book. */
+        const val ACTION_SOUNDS = "com.shelfreader.SOUNDS"
         const val EXTRA_BOOK = "book"
         const val EXTRA_INDEX = "index"
         const val EXTRA_OFFSET = "offset"
@@ -197,7 +199,7 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
 
     private val noisyReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            if (intent?.action == AudioManager.ACTION_AUDIO_BECOMING_NOISY && playing) pause()
+            if (intent?.action == AudioManager.ACTION_AUDIO_BECOMING_NOISY && (playing || Ambience.audible(this@TtsService))) pause()
         }
     }
 
@@ -223,7 +225,7 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
             if (sleepDeadline == 0L) return
             if (SystemClock.elapsedRealtime() >= sleepDeadline) {
                 sleepDeadline = 0L
-                if (playing) pause() else update()
+                if (playing) pause(auto = true) else { if (Ambience.withoutBook(this@TtsService)) Ambience.hush(this@TtsService); update() }
             } else {
                 update()
                 main.postDelayed(this, 15_000)
@@ -245,7 +247,21 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
         when {
             n >= 3 -> seekSeconds(-15)
             n == 2 -> skipChapter(1)
-            else -> if (playing) pause() else play()
+            else -> togglePlay()
+        }
+    }
+
+    /** The last thing paused was sounds on their own, so play resumes them rather than a book. */
+    private var soundsPaused = false
+
+    /** Play/pause from the notification, headphones or widget. Pausing also stops the background sounds. */
+    private fun togglePlay() {
+        when {
+            pendingNext != null -> { cancelPendingNext(); Ambience.hush(this); update() }
+            playing -> pause()
+            Ambience.withoutBook(this) -> { Ambience.hush(this); soundsPaused = true; update() }
+            soundsPaused || segs.isEmpty() -> { soundsPaused = false; Ambience.setSolo(this, true); requestFocus(); update() }
+            else -> play()
         }
     }
 
@@ -260,7 +276,7 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
             .createNotificationChannel(NotificationChannel(CHANNEL, "Reading aloud", NotificationManager.IMPORTANCE_LOW))
         session = MediaSession(this, "ShelfReader").apply {
             setCallback(object : MediaSession.Callback() {
-                override fun onPlay() = play()
+                override fun onPlay() { if (segs.isEmpty()) { Ambience.setSolo(this@TtsService, true); update() } else play() }
                 override fun onPause() = pause()
                 // next / previous track = chapters; fast-forward / rewind = 30 / 15 seconds
                 override fun onSkipToNext() = skipChapter(1)
@@ -295,6 +311,7 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
         if (Build.VERSION.SDK_INT >= 33) registerReceiver(noisyReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
         else registerReceiver(noisyReceiver, filter)
         tts = TextToSpeech(this, this)
+        Ambience.listeners += soundsListener
         audioManager.registerAudioDeviceCallback(deviceCallback, main)
         main.postDelayed({ deviceEventsReady = true }, 3000)   // ignore devices already connected
     }
@@ -355,21 +372,31 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
                 val id = i.getStringExtra(EXTRA_BOOK)
                 if (id != null && bookId == null) load(id)
             }
-            ACTION_TOGGLE, ACTION_NEXT, ACTION_PREV -> if (bookId == null) loadLast()
+            ACTION_TOGGLE, ACTION_NEXT, ACTION_PREV -> if (bookId == null && !Ambience.withoutBook(this) && !soundsPaused) loadLast()
         }
         startForegroundCompat()
         when (action) {
             ACTION_PLAY -> play()
             ACTION_SEEK -> if (playing && ready) speakFrom(segIndex) else update()
-            ACTION_TOGGLE -> if (pendingNext != null) cancelPendingNext() else if (playing) pause() else play()
+            ACTION_TOGGLE -> togglePlay()
+            ACTION_SOUNDS -> { soundsPaused = false; Ambience.setSolo(this, true); requestFocus() }
             ACTION_PAUSE -> pause()
             ACTION_NEXT -> skip(1)
             ACTION_PREV -> skip(-1)
             ACTION_SLEEP -> setSleep(i.getIntExtra(EXTRA_MINUTES, 0))
             ACTION_STOP -> stopAll()
         }
-        if (bookId == null && action != ACTION_STOP) stopAll()
+        if (bookId == null && action != ACTION_STOP && !Ambience.audible(this)) stopAll()
         return START_NOT_STICKY
+    }
+
+    private val soundsListener: () -> Unit = { soundsChanged() }
+
+    /** Background sounds started or stopped: show it, and close the player if nothing is left to play. */
+    private fun soundsChanged() {
+        if (instance !== this) return
+        update()
+        if (!playing && bookId == null && pendingNext == null && !soundsPaused && !Ambience.audible(this)) stopAll()
     }
 
     private fun loadLast(): Boolean = Settings.lastBook(this)?.let { load(it) } ?: false
@@ -476,14 +503,20 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
         if (!requestFocus()) { playing = false; update(); return }
         acquireWake()
         if (ready) speakFrom(segIndex)
+        soundsPaused = false
         Ambience.reading(this, true)
         update()
     }
 
-    fun pause() {
+    /**
+     * [auto]: the book stopped by itself (sleep timer, chapter end), so the background sounds may keep going
+     * for a while (Ambience.keepAfter). Otherwise pause was pressed, and the sounds stop too.
+     */
+    fun pause(auto: Boolean = false) {
+        if (!auto) Ambience.hush(this)
         if (cancelPendingNext()) return
         playing = false
-        Ambience.reading(this, false)
+        if (auto) Ambience.bookStopped(this)
         gen++
         tts?.stop()
         neural?.stop()
@@ -717,7 +750,7 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
             done = true
         }
         playing = false
-        Ambience.reading(this, false)
+        Ambience.bookStopped(this)
         // Up next: start the next book in the queue, or (with "Keep listening" on) another book from the library
         val q = Settings.queue(this).filter { it != id && Library.get(this, it) != null }
         val next = if (!done || id == null) null else q.firstOrNull() ?: if (Settings.autoNextBook(this)) nextBookAfter(id) else null
@@ -818,7 +851,7 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
                     sleepAtChapterEnd = false
                     segIndex = next
                     savePos()
-                    pause()
+                    pause(auto = true)
                     return@post
                 }
                 if (k == lastSpoken && queuedUpTo >= segs.size - 1) {
@@ -891,9 +924,9 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
             .setAudioAttributes(attrs)
             .setOnAudioFocusChangeListener({ change ->
                 when (change) {
-                    AudioManager.AUDIOFOCUS_LOSS -> { resumeOnFocusGain = false; if (playing) pause() }
+                    AudioManager.AUDIOFOCUS_LOSS -> { resumeOnFocusGain = false; if (playing || Ambience.audible(this)) pause() }
                     AudioManager.AUDIOFOCUS_LOSS_TRANSIENT,
-                    AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> if (playing) { resumeOnFocusGain = true; pause() }
+                    AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> if (playing) { resumeOnFocusGain = true; pause() } else if (Ambience.audible(this)) pause()
                     AudioManager.AUDIOFOCUS_GAIN -> if (resumeOnFocusGain) { resumeOnFocusGain = false; play() }
                 }
             }, main)
@@ -932,6 +965,7 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
         val ch = chapterIndexOf(index).let { if (it >= 0) chapters[it].title else null }
         val parts = ArrayList<String>()
         pendingNext?.let { n -> return "Finished · next: ${Library.get(this, n)?.title ?: "the next book"} in a moment (pause to stop)" }
+        if (!playing && Ambience.withoutBook(this)) return (listOf("🌧 Background sounds · ${Ambience.summary(this)}") + listOfNotNull(sleepText())).joinToString(" · ")
         parts += if (playing) "Reading" else "Paused"
         if (ch != null) parts += ch
         parts += "$pct%"
@@ -949,12 +983,13 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
                 // buttons for Android Auto and some lock screens
                 .addCustomAction(PlaybackState.CustomAction.Builder("back15", "Back 15 seconds", android.R.drawable.ic_media_rew).build())
                 .addCustomAction(PlaybackState.CustomAction.Builder("fwd30", "Forward 30 seconds", android.R.drawable.ic_media_ff).build())
-                .setState(if (playing) PlaybackState.STATE_PLAYING else PlaybackState.STATE_PAUSED, index.toLong(), 1f)
+                .setState(if (playing || Ambience.withoutBook(this)) PlaybackState.STATE_PLAYING else PlaybackState.STATE_PAUSED, index.toLong(), 1f)
                 .build()
         )
         val line = statusLine()
-        val key = "$bookId|$line"
-        if (key != lastNotifKey && bookId != null) {
+        val sounds = Ambience.withoutBook(this)
+        val key = "$bookId|$line|$sounds"
+        if (key != lastNotifKey && (bookId != null || sounds)) {
             lastNotifKey = key
             if (foreground) getSystemService(NotificationManager::class.java).notify(NOTIF_ID, buildNotification(line))
             ShelfWidget.push(this, title, line, playing)
@@ -973,7 +1008,8 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
         val flags = PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         val open = PendingIntent.getActivity(
             this, 0,
-            Intent(this, ReaderActivity::class.java).putExtra("book", bookId).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            if (bookId == null) Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            else Intent(this, ReaderActivity::class.java).putExtra("book", bookId).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
             flags
         )
         fun action(icon: Int, label: String, act: String, code: Int) = Notification.Action.Builder(
@@ -983,14 +1019,14 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
 
         return Notification.Builder(this, CHANNEL)
             .setSmallIcon(R.drawable.ic_notif)
-            .setContentTitle(title.ifBlank { "Shelf Reader" })
+            .setContentTitle(if (bookId == null && Ambience.withoutBook(this)) "Background sounds" else title.ifBlank { "Shelf Reader" })
             .setContentText(line)
             .setContentIntent(open)
-            .setOngoing(playing)
+            .setOngoing(playing || Ambience.withoutBook(this))
             .setVisibility(Notification.VISIBILITY_PUBLIC)
             .addAction(action(android.R.drawable.ic_media_previous, "Back", ACTION_PREV, 1))
             .addAction(
-                if (playing) action(android.R.drawable.ic_media_pause, "Pause", ACTION_TOGGLE, 2)
+                if (playing || Ambience.withoutBook(this)) action(android.R.drawable.ic_media_pause, "Pause", ACTION_TOGGLE, 2)
                 else action(android.R.drawable.ic_media_play, "Play", ACTION_TOGGLE, 2)
             )
             .addAction(action(android.R.drawable.ic_media_next, "Next", ACTION_NEXT, 3))
@@ -1001,7 +1037,8 @@ class TtsService : MediaBrowserService(), TextToSpeech.OnInitListener {
 
     override fun onDestroy() {
         instance = null
-        Ambience.reading(this, false)
+        Ambience.listeners -= soundsListener
+        Ambience.hush(this)
         gen++
         main.removeCallbacks(sleepTick)
         main.removeCallbacks(watchdog)

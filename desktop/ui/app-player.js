@@ -114,14 +114,14 @@ function updatePlayer() {
   if (!S.book) return;
   const p = curPara();
   const pct = S.paras.length ? Math.floor((p + 1) * 100 / S.paras.length) : 0;
-  const parts = [S.playing ? (S.loadingVoice ? 'Loading voice…' : 'Reading') : 'Paused'];
+  const parts = [S.playing ? (S.loadingVoice ? 'Loading voice…' : 'Reading') : Ambience.withoutBook() ? 'Paused · 🌧 sounds playing' : 'Paused'];
   const ch = chapterTitle(p); if (ch) parts.push(ch);
   parts.push(pct + '%');
   if (S.sleepChapter) parts.push('sleep at chapter end');
   else if (S.sleepAt) parts.push(`sleep in ${Math.max(1, Math.ceil((S.sleepAt - Date.now()) / 60000))} min`);
   const pn = S.pendingNext && bookById(S.pendingNext.id);
   $('#pStatus').textContent = pn ? `Finished 🎉 · next: “${pn.title}” in a moment · ■ to stop it` : parts.join(' · ');
-  $('#pPlay').textContent = pn ? '■' : S.playing ? '❚❚' : '▶';
+  $('#pPlay').textContent = pn ? '■' : (S.playing || Ambience.withoutBook()) ? '❚❚' : '▶';
   if (!S.seeking) $('#seek').value = S.paras.length ? Math.round(p * 100 / Math.max(1, S.paras.length - 1)) : 0;
   if ('mediaSession' in navigator) navigator.mediaSession.playbackState = S.playing ? 'playing' : 'paused';
 }
@@ -144,11 +144,14 @@ function play() {
   updatePlayer();
   if (S.view === 'library') renderLibrary();
 }
-function pause() {
+/** auto: the book stopped by itself (sleep timer, chapter end), so the background sounds may keep going a while.
+ *  Otherwise pause was pressed, and the sounds stop too. */
+function pause(auto) {
+  if (auto !== true) Ambience.hush();
   if (cancelPendingNext()) return;
   if (!S.playing) { updatePlayer(); return; }
   S.playing = false; S.token++;
-  Ambience.reading(false);
+  if (auto === true) Ambience.bookStopped();
   speechSynthesis.cancel();
   stopAudio();
   keepAlive(false);
@@ -157,7 +160,12 @@ function pause() {
   updatePlayer();
   if (S.view === 'library') renderLibrary();
 }
-function toggle() { if (cancelPendingNext()) return; S.playing ? pause() : play(); }
+function toggle() {
+  if (cancelPendingNext()) { Ambience.hush(); return; }
+  if (S.playing) pause();
+  else if (Ambience.withoutBook()) { Ambience.hush(); updatePlayer(); }
+  else play();
+}
 function speakFrom(i) {
   const token = ++S.token;
   speechSynthesis.cancel();
@@ -264,7 +272,7 @@ function segAdvance(token) {
   if (token !== S.token || !S.playing) return;
   const k = S.segIdx; const next = ((S.segLastFor || {})[k] ?? k) + 1;
   if (S.sleepChapter && next < S.segs.length && chapterIndex(S.segs[next][0]) !== chapterIndex(S.segs[k][0])) {
-    S.sleepChapter = false; S.segIdx = next; pause(); setSleep(0); return;
+    S.sleepChapter = false; S.segIdx = next; pause(true); setSleep(0); return;
   }
   S.segIdx = next;
   if (S.segIdx >= S.segs.length) { finished(); return; }
@@ -368,7 +376,7 @@ function afterMove() {
 }
 async function finished() {
   S.playing = false; S.token++; keepAlive(false); stopAudio();
-  Ambience.reading(false);
+  Ambience.bookStopped();
   $('#pages').classList.remove('listening');
   S.segIdx = Math.max(0, S.segs.length - 1);
   savePos(true); updatePlayer();

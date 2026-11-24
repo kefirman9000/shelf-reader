@@ -9,7 +9,8 @@ import kotlin.math.sqrt
 class AmbienceSynthTest {
     // loudness of each raw sound in the PC app (desktop/ui/ambience-synth.js, 40 s each)
     private val pc = mapOf("rain" to 0.209, "thunder" to 0.075, "waves" to 0.229, "stream" to 0.130, "wind" to 0.088, "fire" to 0.077,
-        "crickets" to 0.090, "fan" to 0.207, "white" to 0.577, "pink" to 0.428, "brown" to 0.200)
+        "crickets" to 0.090, "fan" to 0.207, "white" to 0.577, "pink" to 0.428, "brown" to 0.200,
+        "birds" to 0.057, "chimes" to 0.110, "roof" to 0.133, "train" to 0.282, "clock" to 0.016, "purr" to 0.082)
 
     @Test fun eachSoundMatchesThePcApp() {
         val sr = 32000
@@ -20,7 +21,7 @@ class AmbienceSynthTest {
             for (i in 0 until n) { val x = g.next(); assertTrue("${s.id} made a broken sample", x.isFinite()); sum += x * x }
             val rms = sqrt(sum / n)
             val want = pc.getValue(s.id)
-            val tol = if (s.id == "thunder") 0.6 else 0.4
+            val tol = if (s.id == "thunder" || s.id == "birds" || s.id == "chimes") 0.6 else 0.4
             assertTrue("${s.id}: loudness $rms, PC app $want", abs(rms - want) <= want * tol)
         }
     }

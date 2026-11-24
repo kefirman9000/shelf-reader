@@ -104,7 +104,7 @@ function setSleep(min) {
   if (min > 0) {
     S.sleepAt = Date.now() + min * 60000;
     S.sleepTimer = setInterval(() => {
-      if (Date.now() >= S.sleepAt) { setSleep(0); pause(); toast('Sleep timer: paused'); } else updatePlayer();
+      if (Date.now() >= S.sleepAt) { setSleep(0); if (S.playing) pause(true); else Ambience.hush(); toast('Sleep timer: paused'); } else updatePlayer();
     }, 15000);
   } else if (min < 0) S.sleepChapter = true;
   $('#sleepSel').value = String(min > 0 ? min : min < 0 ? -1 : 0);
@@ -141,7 +141,7 @@ document.addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f' && S.book && S.view === 'reader') { e.preventDefault(); showFind(); return; }
   if (typing || !$('#modal').hidden) return;
   const pagesShown = S.view === 'reader' && bookMode() && S.book;
-  if (e.key === ' ' && S.book) { e.preventDefault(); toggle(); }
+  if (e.key === ' ' && (S.book || Ambience.withoutBook())) { e.preventDefault(); toggle(); }
   else if (pagesShown && !e.shiftKey && (e.key === 'ArrowRight' || e.key === 'PageDown')) { e.preventDefault(); bkNext(); }
   else if (pagesShown && !e.shiftKey && (e.key === 'ArrowLeft' || e.key === 'PageUp')) { e.preventDefault(); bkPrev(); }
   else if (e.key.toLowerCase() === 'f' && S.view === 'reader' && !e.ctrlKey) { bkSetFocus(!document.body.classList.contains('focus')); }

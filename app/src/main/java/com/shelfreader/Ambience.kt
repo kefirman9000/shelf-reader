@@ -44,25 +44,111 @@ object Ambience {
         return m.keys.mapNotNull { id -> AmbienceSynth.SOUNDS.firstOrNull { it.id == id }?.name }.joinToString(", ")
     }
 
+    /** Mixes you saved, by name, in the order you saved them. */
+    fun saved(ctx: Context): List<Pair<String, Map<String, Float>>> =
+        (p(ctx).getString("saved", "") ?: "").split('\n').filter { '\t' in it }.map { line ->
+            val (name, mix) = line.split('\t', limit = 2)
+            name to mix.split(',').mapNotNull { e -> e.split('=').takeIf { it.size == 2 }?.let { (k, v) -> v.toFloatOrNull()?.let { k to it.coerceIn(0f, 1f) } } }.toMap()
+        }
+    fun saveMix(ctx: Context, name: String, m: Map<String, Float>) {
+        val n = name.replace(Regex("[\\t\\n]"), " ").trim().take(40).ifBlank { "My mix" }
+        val list = saved(ctx).filter { it.first != n } + (n to m)
+        p(ctx).edit().putString("saved", list.joinToString("\n") { (k, v) -> k + "\t" + v.entries.joinToString(",") { "${it.key}=${"%.2f".format(java.util.Locale.US, it.value)}" } }).apply()
+    }
+    fun deleteMix(ctx: Context, name: String) {
+        val list = saved(ctx).filter { it.first != name }
+        p(ctx).edit().putString("saved", list.joinToString("\n") { (k, v) -> k + "\t" + v.entries.joinToString(",") { "${it.key}=${"%.2f".format(java.util.Locale.US, it.value)}" } }).apply()
+    }
+
+    /**
+     * When the book stops by itself (sleep timer or the end of the book), keep the sounds going for this
+     * many minutes: 0 = stop with the book, -1 = until you press pause.
+     */
+    fun keepAfter(ctx: Context) = p(ctx).getInt("keepAfter", 0)
+    fun setKeepAfter(ctx: Context, v: Int) { p(ctx).edit().putInt("keepAfter", v).apply() }
+    fun keepAfterText(m: Int) = when { m == 0 -> "Stop with the book"; m < 0 -> "Keep playing until I press pause"; else -> "Keep playing $m more minutes" }
+
     // ---------- playing ----------
+    // Sounds play when any of these is true, and pressing pause anywhere (player, notification,
+    // headphones, lock screen) stops all of them:
+    //   reading    – a book is being read (and "Play while reading" is on)
+    //   lingering  – the book stopped by itself a little while ago (see keepAfter)
+    //   previewing – the Background sounds screen is on screen
+    //   solo       – you pressed "Play sounds" to hear them without a book
 
     @Volatile private var reading = false
     @Volatile private var previewing = false
+    @Volatile private var solo = false
+    @Volatile private var muted = false            // "Pause sounds" while a book keeps reading
+    @Volatile private var lingerUntil = 0L         // elapsedRealtime; Long.MAX_VALUE = until paused
     private val mixer = AmbienceSynth.Mixer(SR)
     private var thread: Thread? = null
     private val lock = Any()
+    private val main = android.os.Handler(android.os.Looper.getMainLooper())
+    /** Told whenever the sounds start or stop (the player's notification, the sounds screen). */
+    val listeners = java.util.concurrent.CopyOnWriteArrayList<() -> Unit>()
 
-    /** The reader started or stopped speaking. */
-    fun reading(ctx: Context, playing: Boolean) { reading = playing; refresh(ctx) }
-    /** The Background sounds screen opened or closed. */
-    fun previewing(ctx: Context, open: Boolean) { previewing = open; refresh(ctx) }
+    private fun lingering() = lingerUntil > android.os.SystemClock.elapsedRealtime()
+    val isSolo get() = solo
+
+    /** True when sounds are playing (or about to) right now. */
+    fun audible(ctx: Context): Boolean {
+        val app = ctx.applicationContext
+        if (muted || mix(app).values.none { it > 0f }) return false
+        return (on(app) && (reading || lingering())) || previewing || solo
+    }
+    /** Sounds are playing without a book being read (on their own, or after the book stopped). */
+    fun withoutBook(ctx: Context) = !reading && audible(ctx)
+
+    /** The reader started or stopped speaking (stopping by itself: see [bookStopped]). */
+    fun reading(ctx: Context, playing: Boolean) {
+        reading = playing
+        if (playing) { muted = false; lingerUntil = 0L; solo = false }
+        refresh(ctx)
+    }
+
+    /** Pause was pressed: every sound stops (and stays off until something is played again). */
+    fun hush(ctx: Context) {
+        reading = false; previewing = false; solo = false; lingerUntil = 0L
+        main.removeCallbacks(lingerEnd)
+        refresh(ctx)
+    }
+
+    /** The book stopped by itself (sleep timer, end of the book): keep the sounds going if that's chosen. */
+    fun bookStopped(ctx: Context) {
+        reading = false
+        val m = keepAfter(ctx)
+        main.removeCallbacks(lingerEnd)
+        lingerUntil = when {
+            m == 0 || !on(ctx) -> 0L
+            m < 0 -> Long.MAX_VALUE
+            else -> android.os.SystemClock.elapsedRealtime() + m * 60_000L
+        }
+        if (m > 0) { lingerCtx = ctx.applicationContext; main.postDelayed(lingerEnd, m * 60_000L + 500) }
+        refresh(ctx)
+    }
+    private var lingerCtx: Context? = null
+    private val lingerEnd = Runnable { lingerCtx?.let { refresh(it) } }
+
+    /** Play the sounds on their own (no book), or stop them. */
+    fun setSolo(ctx: Context, v: Boolean) {
+        solo = v
+        if (v) muted = false
+        refresh(ctx)
+    }
+    /** "Pause sounds" on the sounds screen while a book keeps reading. */
+    fun mute(ctx: Context) { muted = true; previewing = false; solo = false; lingerUntil = 0L; refresh(ctx) }
+    fun unmute(ctx: Context) { muted = false; refresh(ctx) }
+
+    /** The Background sounds screen came on screen or went away. */
+    fun previewing(ctx: Context, open: Boolean) { previewing = open; if (open) muted = false; refresh(ctx) }
 
     fun refresh(ctx: Context) {
         val app = ctx.applicationContext
-        val m = mix(app)
-        val want = on(app) && m.values.any { it > 0f } && (reading || previewing)
-        mixer.set(if (want) m else emptyMap(), if (want) volume(app) else 0f)
+        val want = audible(app)
+        mixer.set(if (want) mix(app) else emptyMap(), if (want) volume(app) else 0f)
         if (want) ensureThread()
+        if (listeners.isNotEmpty()) main.post { for (cb in listeners) try { cb() } catch (_: Throwable) {} }
     }
 
     private fun ensureThread() = synchronized(lock) {
