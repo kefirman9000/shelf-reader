@@ -338,3 +338,4 @@ body.theme-1 input[type=time], body.theme-2 input[type=time] { color-scheme: lig
 .amb-saved .icon.small { font-size: 11px; padding: 2px 5px; opacity: .6; }
 .amb-saved .icon.small:hover { opacity: 1; }
 #ambBtn.on { background: var(--accent); color: var(--accent-fg, #fff); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent); }
+.amb-speed { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; margin-top: 4px; }

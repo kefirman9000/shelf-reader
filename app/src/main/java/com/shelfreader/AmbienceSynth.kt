@@ -32,6 +32,7 @@ object AmbienceSynth {
         Sound("airplane", "✈", "Airplane cabin"),
         Sound("train", "🚆", "Train rumble"),
         Sound("underwater", "🫧", "Underwater"),
+        Sound("heart", "❤", "Heartbeat"),
         Sound("clock", "🕰", "Ticking clock"),
     )
 
@@ -48,12 +49,22 @@ object AmbienceSynth {
         "Deep focus" to mapOf("drone" to 0.45f, "brown" to 0.35f),
         "Deep sleep" to mapOf("brown" to 0.45f, "soft" to 0.35f),
         "Underwater" to mapOf("underwater" to 0.6f, "drone" to 0.2f),
+        "Calm heart" to mapOf("heart" to 0.6f, "soft" to 0.3f),
+        "Womb" to mapOf("heart" to 0.55f, "underwater" to 0.5f),
     )
 
     /** Per-sound level so each is about as loud as the others at the same slider position. */
     val GAIN = mapOf("rain" to 0.3, "thunder" to 3.2, "waves" to 0.64, "stream" to 0.62, "wind" to 1.25, "fire" to 2.9,
         "crickets" to 1.25, "fan" to 1.4, "white" to 0.12, "pink" to 0.24, "brown" to 0.87,
-        "soft" to 0.3, "drone" to 1.5, "airplane" to 0.5, "train" to 0.55, "underwater" to 0.55, "clock" to 2.0)
+        "soft" to 0.3, "drone" to 1.5, "airplane" to 0.5, "train" to 0.55, "underwater" to 0.55, "clock" to 2.0, "heart" to 0.9)
+
+    /** Heartbeat speed in beats a minute (the heartbeat's own setting). */
+    const val HEART_MIN = 40
+    const val HEART_MAX = 140
+    const val HEART_DEF = 60
+
+    /** Live settings shared with the mixer; changes are heard from the next beat. */
+    class Params { @Volatile var heartBpm = HEART_DEF.toDouble() }
 
     fun interface Gen { fun next(): Double }
 
@@ -67,7 +78,7 @@ object AmbienceSynth {
 
     private fun coef(fc: Double, sr: Int) = 1 - exp(-2 * PI * fc / sr)
 
-    fun make(id: String, sr: Int, seed: Long): Gen {
+    fun make(id: String, sr: Int, seed: Long, P: Params = Params()): Gen {
         val r = Rng(seed)
         fun w() = r.next() * 2 - 1
         var p0 = 0.0; var p1 = 0.0; var p2 = 0.0
@@ -242,6 +253,32 @@ object AmbienceSynth {
                     lp3 * 2.4 * sw
                 }
             }
+            "heart" -> {
+                // a calm heartbeat, lub-dub, at the speed you choose. Each beat is a soft low thud that drops in pitch.
+                var next = 0; var t = 0; var s2At = -1; var e1 = 0.0; var e2 = 0.0; var a1 = 0.0; var a2 = 0.0
+                var f1 = 0.0; var f2 = 0.0; var ph1 = 0.0; var ph2 = 0.0; var lp = 0.0; var lp2 = 0.0; var bed = 0.0; var bed2 = 0.0
+                val d1 = exp(-1 / (sr * 0.075)); val d2 = exp(-1 / (sr * 0.06)); val fd = exp(-1 / (sr * 0.035)); val kA = coef(80.0, sr)
+                val aLp = coef(200.0, sr); val aB = coef(80.0, sr); val tau = 2 * PI
+                Gen {
+                    if (--next <= 0) {
+                        val bpm = P.heartBpm.coerceIn(HEART_MIN.toDouble(), HEART_MAX.toDouble())
+                        val period = 60 / bpm * (0.98 + r.next() * 0.04)   // a living heart isn't a metronome
+                        next = floor(period * sr).toInt(); t = 0
+                        s2At = floor(minOf(0.32, period * 0.36) * sr).toInt()
+                        e1 = 0.9 + r.next() * 0.1; a1 = 0.0; f1 = 120.0; ph1 = 0.0
+                    }
+                    if (t++ == s2At) { e2 = 0.6 + r.next() * 0.1; a2 = 0.0; f2 = 150.0; ph2 = 0.0 }
+                    f1 = 52 + (f1 - 52) * fd; f2 = 64 + (f2 - 64) * fd
+                    ph1 += tau * f1 / sr; if (ph1 > tau) ph1 -= tau
+                    ph2 += tau * f2 / sr; if (ph2 > tau) ph2 -= tau
+                    a1 += kA * (1 - a1); a2 += kA * (1 - a2)
+                    val x = w(); lp += aLp * (x - lp); lp2 += aLp * (lp - lp2)
+                    val y = brown(); bed += aB * (y - bed); bed2 += aB * (bed - bed2)
+                    val out = (sin(ph1) + lp2 * 2.5) * e1 * a1 + (sin(ph2) + lp2 * 2.5) * e2 * a2 + bed2 * 0.15
+                    e1 *= d1; e2 *= d2
+                    out
+                }
+            }
             "crickets" -> {
                 class Cr(val f: Double, var ph: Double, var next: Int, var pulse: Int, var t: Int, val pl: Int, val gap: Int, val n: Int, val v: Double, val every: Double)
                 val cr = List(3) {
@@ -269,6 +306,7 @@ object AmbienceSynth {
 
     /** Mixes the chosen sounds; [set] can be called from any thread while another renders. */
     class Mixer(private val sr: Int) {
+        val params = Params()
         private val gen = HashMap<String, Gen>()
         private val g = HashMap<String, Double>()
         @Volatile private var target: Map<String, Double> = emptyMap()
@@ -292,7 +330,7 @@ object AmbienceSynth {
             for (s in SOUNDS) {
                 val t = tg[s.id] ?: 0.0
                 if (t == 0.0 && (g[s.id] ?: 0.0) < 1e-4) { g[s.id] = 0.0; gen.remove(s.id); continue }
-                if (s.id !in gen) gen[s.id] = make(s.id, sr, (seed++ * 2654435761L))
+                if (s.id !in gen) gen[s.id] = make(s.id, sr, (seed++ * 2654435761L), params)
                 act += s.id
             }
             val gens = Array(act.size) { gen[act[it]]!! }

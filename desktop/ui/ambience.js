@@ -9,7 +9,7 @@ const Ambience = (() => {
   const A = window.AmbienceSynth;
   let ctx = null, node = null, script = null, reading = false, previewing = false, solo = false, muted = false, lingerUntil = 0, lingerTimer = 0, starting = null, idleTimer = 0;
 
-  const cfg = () => Object.assign({ on: false, volume: 0.6, mix: {}, keepAfter: 0, saved: [] }, (typeof S !== 'undefined' && S.settings && S.settings.ambience) || {});
+  const cfg = () => Object.assign({ on: false, volume: 0.6, mix: {}, keepAfter: 0, saved: [], heartBpm: 60 }, (typeof S !== 'undefined' && S.settings && S.settings.ambience) || {});
   const lingering = () => lingerUntil > Date.now();
   function audible() {
     const c = cfg();
@@ -41,8 +41,9 @@ const Ambience = (() => {
   }
 
   function send(mix, master) {
-    if (node) node.port.postMessage({ mix, master });
-    else if (script) script.mixer.set(mix, master);
+    const params = { heartBpm: +cfg().heartBpm || 60 };
+    if (node) node.port.postMessage({ mix, master, params });
+    else if (script) script.mixer.set(mix, master, params);
   }
 
   async function refresh() {
@@ -147,6 +148,7 @@ const Ambience = (() => {
         <div class="amb-card" data-id="${id}">
           <div class="amb-head"><b>${s.icon} ${esc(s.name)}</b><span class="muted small" data-pct>${v}%</span><button class="icon" data-remove title="Remove ${esc(s.name)}">✕</button></div>
           <input type="range" min="0" max="100" value="${v}" data-vol>
+          ${id === 'heart' ? `<div class="amb-speed"><span class="muted small">Speed</span><input type="range" min="${A.HEART.min}" max="${A.HEART.max}" value="${+c.heartBpm || 60}" data-bpm><span class="muted small" data-bpmval>${+c.heartBpm || 60} beats a minute</span></div>` : ''}
         </div>`; }).join('')}
       ${rest.length ? '<h4 class="amb-h">Add a sound</h4>' : ''}
       ${rest.map((s) => `<button class="amb-add" data-add="${s.id}"><span>${s.icon}</span> ${esc(s.name)}<span class="amb-plus">+ Add</span></button>`).join('')}
@@ -173,6 +175,8 @@ const Ambience = (() => {
         card.querySelector('[data-pct]').textContent = e.target.value + '%';
         save({ mix: Object.assign({}, cfg().mix, { [id]: +e.target.value / 100 }) }); hear();
       };
+      const bpm = card.querySelector('[data-bpm]');
+      if (bpm) bpm.oninput = (e) => { card.querySelector('[data-bpmval]').textContent = e.target.value + ' beats a minute'; save({ heartBpm: +e.target.value }); hear(); };
       card.querySelector('[data-remove]').onclick = () => { const m = Object.assign({}, cfg().mix); delete m[id]; save({ mix: m }); render(); };
     });
     body.querySelectorAll('[data-add]').forEach((b) => { b.onclick = () => { save({ on: true, mix: Object.assign({}, cfg().mix, { [b.dataset.add]: 0.5 }) }); hear(); render(); }; });

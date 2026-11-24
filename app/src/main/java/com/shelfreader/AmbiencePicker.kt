@@ -206,6 +206,24 @@ class AmbiencePicker(private val a: Activity, private val onClose: () -> Unit = 
                 pct.text = "${(nv * 100).toInt()}%"
                 Ambience.setMix(app, Ambience.mix(app).apply { put(id, nv) }); hear()
             })
+            if (id == "heart") {
+                // the heartbeat's speed, next to its volume
+                val lo = AmbienceSynth.HEART_MIN; val hi = AmbienceSynth.HEART_MAX
+                val label = TextView(a).apply { textSize = 13f; setTextColor(UiColors.MUTED); text = "Speed: ${Ambience.heartBpm(app)} beats a minute" }
+                c.addView(label)
+                c.addView(SeekBar(a).apply {
+                    max = hi - lo; progress = Ambience.heartBpm(app) - lo
+                    setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                        override fun onProgressChanged(sb: SeekBar?, x: Int, fromUser: Boolean) {
+                            if (!fromUser) return
+                            label.text = "Speed: ${x + lo} beats a minute"
+                            Ambience.setHeartBpm(app, x + lo); hear()
+                        }
+                        override fun onStartTrackingTouch(sb: SeekBar?) {}
+                        override fun onStopTrackingTouch(sb: SeekBar?) {}
+                    })
+                })
+            }
             body.addView(c)
         }
 

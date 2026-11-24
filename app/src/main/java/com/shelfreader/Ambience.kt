@@ -22,6 +22,10 @@ object Ambience {
     fun volume(ctx: Context) = p(ctx).getFloat("volume", 0.6f)
     fun setVolume(ctx: Context, v: Float) { p(ctx).edit().putFloat("volume", v.coerceIn(0f, 1f)).apply(); refresh(ctx) }
 
+    /** Heartbeat speed, beats a minute. */
+    fun heartBpm(ctx: Context) = p(ctx).getInt("heartBpm", AmbienceSynth.HEART_DEF)
+    fun setHeartBpm(ctx: Context, v: Int) { p(ctx).edit().putInt("heartBpm", v.coerceIn(AmbienceSynth.HEART_MIN, AmbienceSynth.HEART_MAX)).apply(); refresh(ctx) }
+
     /** Sound id → its volume 0–1, in the order they were added. */
     fun mix(ctx: Context): LinkedHashMap<String, Float> {
         val out = LinkedHashMap<String, Float>()
@@ -146,6 +150,7 @@ object Ambience {
     fun refresh(ctx: Context) {
         val app = ctx.applicationContext
         val want = audible(app)
+        mixer.params.heartBpm = heartBpm(app).toDouble()
         mixer.set(if (want) mix(app) else emptyMap(), if (want) volume(app) else 0f)
         if (want) ensureThread()
         if (listeners.isNotEmpty()) main.post { for (cb in listeners) try { cb() } catch (_: Throwable) {} }

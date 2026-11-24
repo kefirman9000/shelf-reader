@@ -10,7 +10,7 @@ class AmbienceSynthTest {
     // loudness of each raw sound in the PC app (desktop/ui/ambience-synth.js, 40 s each)
     private val pc = mapOf("rain" to 0.259, "thunder" to 0.071, "waves" to 0.229, "stream" to 0.130, "wind" to 0.081, "fire" to 0.077,
         "crickets" to 0.090, "fan" to 0.207, "white" to 0.577, "pink" to 0.428, "brown" to 0.200,
-        "soft" to 0.535, "drone" to 0.105, "airplane" to 0.306, "train" to 0.278, "underwater" to 0.287, "clock" to 0.016)
+        "soft" to 0.535, "drone" to 0.105, "airplane" to 0.306, "train" to 0.278, "underwater" to 0.287, "clock" to 0.016, "heart" to 0.152)
 
     @Test fun eachSoundMatchesThePcApp() {
         val sr = 32000

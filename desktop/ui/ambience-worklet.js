@@ -3,7 +3,7 @@ class AmbienceProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
     this.mixer = new globalThis.AmbienceSynth.Mixer(sampleRate);
-    this.port.onmessage = (e) => this.mixer.set(e.data.mix, e.data.master);
+    this.port.onmessage = (e) => this.mixer.set(e.data.mix, e.data.master, e.data.params);
   }
   process(_in, outputs) {
     const out = outputs[0];

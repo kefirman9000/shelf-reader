@@ -20,6 +20,7 @@
     { id: 'airplane', icon: '✈', name: 'Airplane cabin' },
     { id: 'train', icon: '🚆', name: 'Train rumble' },
     { id: 'underwater', icon: '🫧', name: 'Underwater' },
+    { id: 'heart', icon: '❤', name: 'Heartbeat' },
     { id: 'clock', icon: '🕰', name: 'Ticking clock' },
   ];
   const PRESETS = [
@@ -35,10 +36,14 @@
     { name: 'Deep focus', mix: { drone: 0.45, brown: 0.35 } },
     { name: 'Deep sleep', mix: { brown: 0.45, soft: 0.35 } },
     { name: 'Underwater', mix: { underwater: 0.6, drone: 0.2 } },
+    { name: 'Calm heart', mix: { heart: 0.6, soft: 0.3 } },
+    { name: 'Womb', mix: { heart: 0.55, underwater: 0.5 } },
   ];
   // per-sound level so each one is about as loud as the others at the same slider position
   const GAIN = { rain: 0.3, thunder: 3.2, waves: 0.64, stream: 0.62, wind: 1.25, fire: 2.9, crickets: 1.25, fan: 1.4, white: 0.12, pink: 0.24, brown: 0.87,
-    soft: 0.3, drone: 1.5, airplane: 0.5, train: 0.55, underwater: 0.55, clock: 2 };
+    soft: 0.3, drone: 1.5, airplane: 0.5, train: 0.55, underwater: 0.55, clock: 2, heart: 0.9 };
+  // heartbeat speed, beats a minute (the heartbeat's own setting)
+  const HEART = { min: 40, max: 140, def: 60 };
 
   function rng(seed) {
     let s = seed >>> 0 || 1;
@@ -46,7 +51,9 @@
   }
   const coef = (fc, sr) => 1 - Math.exp(-2 * Math.PI * fc / sr);
 
-  function make(id, sr, seed) {
+  /** P: live settings shared with the mixer, e.g. { heartBpm: 60 }; changes are heard from the next beat. */
+  function make(id, sr, seed, P) {
+    P = P || { heartBpm: HEART.def };
     const r = rng(seed);
     const w = () => r() * 2 - 1;
     // pink noise (Paul Kellet)
@@ -212,6 +219,31 @@
           return lp3 * 2.4 * sw;
         };
       }
+      case 'heart': {
+        // a calm heartbeat, lub-dub, at the speed you choose. Each beat is a soft low thud that drops in pitch.
+        let next = 0, t = 0, s2At = -1, e1 = 0, e2 = 0, a1 = 0, a2 = 0, f1 = 0, f2 = 0, ph1 = 0, ph2 = 0, lp = 0, lp2 = 0, bed = 0, bed2 = 0;
+        const d1 = Math.exp(-1 / (sr * 0.075)), d2 = Math.exp(-1 / (sr * 0.06)), fd = Math.exp(-1 / (sr * 0.035)), kA = coef(80, sr);
+        const aLp = coef(200, sr), aB = coef(80, sr), TAU = 2 * Math.PI;
+        return () => {
+          if (--next <= 0) {
+            const bpm = Math.max(HEART.min, Math.min(HEART.max, +P.heartBpm || HEART.def));
+            const period = 60 / bpm * (0.98 + r() * 0.04);   // a living heart isn't a metronome
+            next = Math.floor(period * sr); t = 0;
+            s2At = Math.floor(Math.min(0.32, period * 0.36) * sr);
+            e1 = 0.9 + r() * 0.1; a1 = 0; f1 = 120; ph1 = 0;
+          }
+          if (t++ === s2At) { e2 = 0.6 + r() * 0.1; a2 = 0; f2 = 150; ph2 = 0; }
+          f1 = 52 + (f1 - 52) * fd; f2 = 64 + (f2 - 64) * fd;
+          ph1 += TAU * f1 / sr; if (ph1 > TAU) ph1 -= TAU;
+          ph2 += TAU * f2 / sr; if (ph2 > TAU) ph2 -= TAU;
+          a1 += kA * (1 - a1); a2 += kA * (1 - a2);
+          const x = w(); lp += aLp * (x - lp); lp2 += aLp * (lp - lp2);
+          const y = brown(); bed += aB * (y - bed); bed2 += aB * (bed - bed2);
+          const out = (Math.sin(ph1) + lp2 * 2.5) * e1 * a1 + (Math.sin(ph2) + lp2 * 2.5) * e2 * a2 + bed2 * 0.15;
+          e1 *= d1; e2 *= d2;
+          return out;
+        };
+      }
       case 'crickets': {
         const N = 3, cr = [];
         for (let i = 0; i < N; i++) cr.push({ f: 2 * Math.PI * (4200 + r() * 1000) / sr, ph: 0, next: sec(0.1, 1.2), pulse: -1, t: 0, pl: Math.floor(sr * 0.016), gap: Math.floor(sr * 0.014), n: 3 + Math.floor(r() * 2), v: 0.35 + r() * 0.65, every: [0.55 + r() * 0.5] });
@@ -236,8 +268,9 @@
 
   /** Mixes the chosen sounds. mix = { rain: 0.6, … } (0–1 each); master 0–1. */
   class Mixer {
-    constructor(sr) { this.sr = sr; this.gen = {}; this.g = {}; this.target = {}; this.master = 0; this.masterT = 0; this.seed = 1234; }
-    set(mix, master) {
+    constructor(sr) { this.sr = sr; this.gen = {}; this.g = {}; this.target = {}; this.master = 0; this.masterT = 0; this.seed = 1234; this.params = { heartBpm: HEART.def }; }
+    set(mix, master, params) {
+      if (params) Object.assign(this.params, params);
       for (const s of SOUNDS) { const v = Math.max(0, Math.min(1, +(mix && mix[s.id]) || 0)); this.target[s.id] = v * v * GAIN[s.id]; }
       this.masterT = Math.max(0, Math.min(1, master));
     }
@@ -249,7 +282,7 @@
       for (const id of ids) {
         const tg = this.target[id] || 0, g = this.g[id] || 0;
         if (tg === 0 && g < 1e-4) { this.g[id] = 0; if (this.gen[id]) delete this.gen[id]; continue; }
-        if (!this.gen[id]) this.gen[id] = make(id, this.sr, this.seed++ * 2654435761);
+        if (!this.gen[id]) this.gen[id] = make(id, this.sr, this.seed++ * 2654435761, this.params);
         act.push(id);
       }
       for (let i = 0; i < n; i++) {
@@ -264,7 +297,7 @@
     }
   }
 
-  const api = { SOUNDS, PRESETS, GAIN, make, Mixer };
+  const api = { SOUNDS, PRESETS, GAIN, HEART, make, Mixer };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.AmbienceSynth = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);
